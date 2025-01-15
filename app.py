@@ -8,7 +8,7 @@ class PDFImporterApp(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("PDF Importer")
+        self.setWindowTitle("Správa zakázek - konstrukce")
         
         layout = QVBoxLayout()
 
@@ -32,6 +32,9 @@ class PDFImporterApp(QWidget):
 
         # Set up models for the tables
         self.setup_models()
+
+        # Maximize the window, keeping the title bar visible
+        self.showMaximized()
 
     def initialize_database(self):
         """Creates the tables in the database."""
@@ -78,8 +81,17 @@ class PDFImporterApp(QWidget):
         # Polozka model
         self.polozka_model = QSqlTableModel(self, db)
         self.polozka_model.setTable("položka")
+        # self.polozka_model.setQuery("""
+        #     SELECT p.id, p.number, p.title, p.quantity, z.title as foreign_key_title 
+        #     FROM položka p 
+        #     LEFT JOIN zakázka z ON p.foreign_key_zakazka = z.id
+        # """)  # Perform the join to get the related title
         self.polozka_model.select()  # Load the data
         self.polozka_table.setModel(self.polozka_model)
+
+        # Adjust column widths to fit content
+        self.zakazka_table.resizeColumnsToContents()
+        self.polozka_table.resizeColumnsToContents()
 
     def import_pdf(self):
         """Handles PDF import and data extraction."""
