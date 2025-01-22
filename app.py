@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog, QTableView
-from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
+from PyQt6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel
 import sys
 import sqlite3
 from pdf2data import extract_data_from_pdf
@@ -46,7 +46,10 @@ class PDFImporterApp(QWidget):
             CREATE TABLE IF NOT EXISTS zakázka (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 number TEXT,
-                title TEXT
+                title TEXT,
+                manazer TEXT NULL,
+                projektant NULL,
+                obchod NULL
             )
         ''')
 
@@ -58,6 +61,13 @@ class PDFImporterApp(QWidget):
                 title TEXT,
                 quantity INTEGER,
                 foreign_key_zakazka INTEGER,
+                vykres TEXT,
+                vytvoreno TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                kreslil TEXT NULL,
+                start DATE NULL,
+                finish DATE NULL,
+                cancel DATE NULL,
+                poznamky TEXT,
                 FOREIGN KEY(foreign_key_zakazka) REFERENCES zakázka(id)
             )
         ''')
@@ -75,17 +85,19 @@ class PDFImporterApp(QWidget):
         # Zakázka model
         self.zakazka_model = QSqlTableModel(self, db)
         self.zakazka_model.setTable("zakázka")
-        self.zakazka_model.select()  # Load the data
+        
+        self.zakazka_model.setQuery("SELECT number, title FROM zakázka", db)
+        # self.zakazka_model.select()  # Load the data
         self.zakazka_table.setModel(self.zakazka_model)
 
         # Polozka model
-        self.polozka_model = QSqlTableModel(self, db)
-        self.polozka_model.setTable("položka")
-        # self.polozka_model.setQuery("""
-        #     SELECT p.id, p.number, p.title, p.quantity, z.title as foreign_key_title 
-        #     FROM položka p 
-        #     LEFT JOIN zakázka z ON p.foreign_key_zakazka = z.id
-        # """)  # Perform the join to get the related title
+        self.polozka_model = QSqlRelationalTableModel(self, db)
+        self.polozka_model.setTable("položka")          
+        self.polozka_model.setQuery("""
+            SELECT p.number, p.title, p.quantity, z.number as foreign_key_title 
+            FROM položka p 
+            LEFT JOIN zakázka z ON p.foreign_key_zakazka = z.number
+        """)  # Perform the join to get the related title
         self.polozka_model.select()  # Load the data
         self.polozka_table.setModel(self.polozka_model)
 
