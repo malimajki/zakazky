@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit
+from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 from PySide6.QtCore import QSortFilterProxyModel, Qt
 import sys
@@ -14,11 +14,18 @@ class PDFImporterApp(QWidget):
         
         layout = QHBoxLayout()
 
-        # Create Import button
+        search_layout = QVBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Pro vyhledávání začni psát")
+        self.search_input.textChanged.connect(self.on_search_text_changed)
         self.import_button = QPushButton("Nahrát objednávku")
         self.import_button.setFixedWidth(200)
         self.import_button.clicked.connect(self.import_pdf)
-        layout.addWidget(self.import_button)
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.import_button)
+        layout.addLayout(search_layout)
+
+        # Create Import button
 
         # Table View for zakázka
         self.zakazka_table = QTableView()
@@ -32,13 +39,18 @@ class PDFImporterApp(QWidget):
 
         # Search bar
         search_layout = QHBoxLayout()
-        search_label = QLabel("Search:")
+        search_label = QLabel("Najdi:")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Type name or email...")
+        self.search_input.setPlaceholderText("Pro vyhledávání začni psát")
         self.search_input.textChanged.connect(self.on_search_text_changed)
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
         layout.addLayout(search_layout)
+
+         # Enable right-click context menu on polozka_table
+        self.polozka_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.polozka_table.customContextMenuRequested.connect(self.show_context_menu)
+
 
         self.setLayout(layout)
         self.showMaximized()
@@ -121,6 +133,54 @@ class PDFImporterApp(QWidget):
 
         self.polozka_table.setModel(self.polozka_filter_model)
 
+    def show_context_menu(self, position):
+        """Shows context menu on right-click in the položka table."""
+        index = self.polozka_table.indexAt(position)
+        if not index.isValid():
+            return
+        menu = QMenu(self)
+        action_generate_number = menu.addAction("Generovat číslo")
+
+        action = menu.exec(self.polozka_table.viewport().mapToGlobal(position))
+        if action == action_generate_number:
+            self.generate_number(index.row())
+
+    def generate_number(self, row):
+        """Generates and assigns a number in the format K-{zakazka}-{unique_number}."""
+        zakazka_index = self.polozka_filter_model.index(row, 4)  # Get zakazka column (foreign key)
+        polozka_id_index = self.polozka_filter_model.index(row, 0)  # Get polozka ID column
+
+        zakazka_id = self.polozka_filter_model.data(zakazka_index)
+        polozka_id = self.polozka_filter_model.data(polozka_id_index)
+
+        if zakazka_id is None or polozka_id is None:
+            return
+
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+
+        # Get the highest number assigned for this zakazka
+        cursor.execute("SELECT vykres FROM položka WHERE zakazka = ? AND vykres LIKE ?", (zakazka_id, f"K-{zakazka_id[:3]}-%"))
+        existing_numbers = cursor.fetchall()
+
+        # Find the next available vykres
+        next_number = 1
+        if existing_numbers:
+            existing_numbers = [int(num[0].split('-')[-1]) for num in existing_numbers if num[0] and num[0].startswith(f"K-{zakazka_id[:3]}-")]
+            if existing_numbers:
+                next_number = max(existing_numbers) + 1
+
+        generated_number = f"K-{zakazka_id[:3]}-{next_number:02d}"
+
+        # Update the database
+        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ? AND (vykres IS NULL OR vykres = '')", (generated_number, polozka_id))
+        conn.commit()
+        conn.close()
+
+        # Refresh model
+        self.polozka_model.select()
+
+
     def on_search_text_changed(self, text):
         """Triggered when the search input changes."""
         self.polozka_filter_model.setFilterFixedString(text)
@@ -154,21 +214,34 @@ class PDFImporterApp(QWidget):
         
         # Insert zakázka data
         zakazka_data = data['zakázka']
-        cursor.execute('''
-            INSERT INTO zakázka (number, title) VALUES (?, ?)
-        ''', (zakazka_data[0][0], zakazka_data[1][0]))
-        
-        zakazka_id = zakazka_data[0][0]  # Get the last inserted ID for foreign key
-        
-        # Insert položka data
-        for item in data['položky']:
+        try:
             cursor.execute('''
-                INSERT INTO položka (number, title, ks, zakazka) 
-                VALUES (?, ?, ?, ?)
-            ''', (item[0][0], item[1][0], item[2][0], zakazka_id))
+                INSERT INTO zakázka (number, title) VALUES (?, ?)
+            ''', (zakazka_data[0][0], zakazka_data[1][0]))
+            
+            zakazka_id = zakazka_data[0][0]  # Get the last inserted ID for foreign key
+            
+            # Insert položka data
+            for item in data['položky']:
+                cursor.execute('''
+                    INSERT INTO položka (number, title, ks, zakazka) 
+                    VALUES (?, ?, ?, ?)
+                ''', (item[0][0], item[1][0], item[2][0], zakazka_id))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
+            
+        except sqlite3.IntegrityError:
+            conn.rollback()  # Rollback in case of an error
+
+            # Show pop-up warning message
+            msg_box = QMessageBox()
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("Duplicitní zakázka")
+            msg_box.setText(f"Zakázka s číslem {zakazka_data[0][0]} již existuje!")
+            msg_box.exec()
+
+        finally:
+            conn.close()
 
         # Refresh the models to reflect changes
         self.zakazka_model.select()
