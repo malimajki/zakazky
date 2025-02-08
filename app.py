@@ -1,10 +1,69 @@
-from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu
+from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QFormLayout, QSpinBox, QDialogButtonBox, QDialog, QStyledItemDelegate
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtGui import QBrush
 import sys
 import sqlite3
 
 from pdf2data import extract_data_from_pdf
+
+class AddPolozkaDialog(QDialog):
+    """Dialog window for adding a new položka."""
+    def __init__(self, zakazka_id, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Přidat novou položku")
+        self.zakazka_id = zakazka_id
+
+        layout = QFormLayout()
+
+        self.number_input = QLineEdit()
+        self.number_input.setPlaceholderText("Číslo")
+
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("Název")
+
+        self.ks_input = QSpinBox()
+        self.ks_input.setMinimum(1)
+
+        layout.addRow("Číslo:", self.number_input)
+        layout.addRow("Název:", self.title_input)
+        layout.addRow("Ks:", self.ks_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+
+    def get_data(self):
+        """Returns the entered data."""
+        return self.number_input.text().strip(), self.title_input.text().strip(), self.ks_input.value()
+    
+class AddPodsestavaDialog(QDialog):
+    """Dialog window for adding a new podsestava."""
+    def __init__(self, zakazka_id, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Přidat novou podsestavu")
+        self.zakazka_id = zakazka_id
+
+        layout = QFormLayout()
+
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("Název")
+
+        layout.addRow("Název:", self.title_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+
+    def get_data(self):
+        """Returns the entered data."""
+        return self.title_input.text().strip()
 
 class PDFImporterApp(QWidget):
     def __init__(self):
@@ -13,43 +72,62 @@ class PDFImporterApp(QWidget):
         self.setWindowTitle("Zakázky")
         
         layout = QHBoxLayout()
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        screen_width = QApplication.primaryScreen().size().width()
 
         search_layout = QVBoxLayout()
+        search_layout.setContentsMargins(10, 20, 10, 20)
+
+        # Input at the top
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pro vyhledávání začni psát")
+        self.search_input.setFixedWidth(int(screen_width * 0.20))
         self.search_input.textChanged.connect(self.on_search_text_changed)
+        search_layout.addWidget(self.search_input)
+
+        # Add stretch between input and button
+        search_layout.addStretch()
+
+        # Button at the bottom
         self.import_button = QPushButton("Nahrát objednávku")
         self.import_button.setFixedWidth(200)
         self.import_button.clicked.connect(self.import_pdf)
-        search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.import_button)
-        layout.addLayout(search_layout)
 
-        # Create Import button
+        layout.addLayout(search_layout)
 
         # Table View for zakázka
+        zakazka_layout = QVBoxLayout()
+        self.zakazka_label = QLabel("Zakázky")
         self.zakazka_table = QTableView()
         self.zakazka_table.setFixedWidth(340)
-        layout.addWidget(self.zakazka_table)
+        zakazka_layout.addWidget(self.zakazka_label)
+        zakazka_layout.addWidget(self.zakazka_table)
+        layout.addLayout(zakazka_layout)
         
         # Table View for položka
+        polozka_layout = QVBoxLayout()
+        self.polozka_label = QLabel("Položky")
+        self.podpolozka_label = QLabel("Podsestavy")
         self.polozka_table = QTableView()
-        self.polozka_table.setFixedWidth(670)
-        layout.addWidget(self.polozka_table)
 
-        # Search bar
-        search_layout = QHBoxLayout()
-        search_label = QLabel("Najdi:")
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Pro vyhledávání začni psát")
-        self.search_input.textChanged.connect(self.on_search_text_changed)
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(self.search_input)
-        layout.addLayout(search_layout)
+        self.polozka_table.setFixedWidth(650)
+        self.podpolozka_table = QTableView()
+        self.podpolozka_table.setFixedWidth(650)
+        polozka_layout.addWidget(self.polozka_label)
+        polozka_layout.addWidget(self.polozka_table)
+        # polozka_layout.addWidget(self.podpolozka_label)
+        # polozka_layout.addWidget(self.podpolozka_table)
+        layout.addLayout(polozka_layout)
+
 
          # Enable right-click context menu on polozka_table
         self.polozka_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.polozka_table.customContextMenuRequested.connect(self.show_context_menu)
+        self.polozka_table.customContextMenuRequested.connect(self.show_polozka_context_menu)
+
+        self.zakazka_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.zakazka_table.customContextMenuRequested.connect(self.show_zakazka_context_menu)
 
 
         self.setLayout(layout)
@@ -84,6 +162,7 @@ class PDFImporterApp(QWidget):
                 ks INTEGER,
                 zakazka INTEGER,
                 vykres TEXT NULL,
+                podsestava BOOLEAN NOT NULL DEFAULT 0,
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
             )
         ''')
@@ -102,6 +181,10 @@ class PDFImporterApp(QWidget):
         self.zakazka_model = QSqlTableModel(self, db)
         self.zakazka_model.setTable("zakázka")
         self.zakazka_model.select()  # Load the data
+        self.zakazka_model.setHeaderData(1, Qt.Orientation.Horizontal, "Číslo")
+        self.zakazka_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
+
+
         self.zakazka_table.setModel(self.zakazka_model)
         self.zakazka_table.selectionModel().selectionChanged.connect(self.zakazka_changed)
         self.zakazka_table.hideColumn(0)
@@ -114,12 +197,21 @@ class PDFImporterApp(QWidget):
         self.polozka_model = QSqlTableModel(self, db)
         self.polozka_model.setTable("položka")
         self.polozka_model.select()  # Load the data
+        self.polozka_model.setHeaderData(1, Qt.Orientation.Horizontal, "Číslo")
+        self.polozka_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
+        self.polozka_model.setHeaderData(3, Qt.Orientation.Horizontal, "Ks")
+        self.polozka_model.setHeaderData(4, Qt.Orientation.Horizontal, "Zakázka")
+        self.polozka_model.setHeaderData(5, Qt.Orientation.Horizontal, "Výkres")
+
         self.polozka_table.setModel(self.polozka_model)
         self.polozka_table.hideColumn(0)
+        self.polozka_table.hideColumn(6)
+        self.polozka_table.setSortingEnabled(True)
+        self.polozka_table.sortByColumn(5, Qt.DescendingOrder)
         self.polozka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.polozka_table.verticalHeader().setVisible(False)
         self.polozka_table.setColumnWidth(1, 70)
-        self.polozka_table.setColumnWidth(2, 400)
+        self.polozka_table.setColumnWidth(2, 350)
         self.polozka_table.setColumnWidth(3, 30)
         self.polozka_table.setColumnWidth(4, 80)
         self.polozka_table.setColumnWidth(5, 80)
@@ -128,12 +220,80 @@ class PDFImporterApp(QWidget):
         self.polozka_filter_model = QSortFilterProxyModel(self)
         self.polozka_filter_model.setSourceModel(self.polozka_model)
         self.polozka_filter_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.polozka_filter_model.setFilterKeyColumn(-1)  # Filter based on the zakazka_number
+        self.polozka_filter_model.setFilterKeyColumn(4)  # Filter based on the zakazka_number
         self.polozka_filter_model.setFilterFixedString("")  # No filter initially
 
         self.polozka_table.setModel(self.polozka_filter_model)
 
-    def show_context_menu(self, position):
+    def show_zakazka_context_menu(self, position):
+        """Shows context menu on right-click in the zakazka table."""
+        index = self.zakazka_table.indexAt(position)
+        if not index.isValid():
+            return
+
+        menu = QMenu(self)
+        action_add_polozka = menu.addAction("Přidat položku")
+        action_add_podsestava = menu.addAction("Přidat podsestavu")
+
+        action = menu.exec(self.zakazka_table.viewport().mapToGlobal(position))
+        if action == action_add_polozka:
+            self.add_polozka(index.row())
+        if action == action_add_podsestava:
+            self.add_podsestava(index.row())
+
+    def add_polozka(self, row):
+        """Opens a dialog to add a new polozka and saves it to the database."""
+        zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
+
+        dialog = AddPolozkaDialog(zakazka_id, self)
+        if dialog.exec():
+            number, title, ks = dialog.get_data()
+
+            if not title:  # Title is required
+                return
+
+            conn = sqlite3.connect("database.db")
+            cursor = conn.cursor()
+
+            cursor.execute("INSERT INTO položka (number, title, ks, zakazka) VALUES (?, ?, ?, ?)",
+                           (number if number else None, title, ks, zakazka_id))
+
+            conn.commit()
+            conn.close()
+
+            # Refresh table
+            self.polozka_model.select()
+
+    def add_podsestava(self, row):
+        """Opens a dialog to add a new podsestava and saves it to the database."""
+        zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
+
+        dialog = AddPodsestavaDialog(zakazka_id, self)
+        if dialog.exec():
+            title = dialog.get_data()
+
+            if not title:  # Title is required
+                return
+
+            conn = sqlite3.connect("database.db")
+            cursor = conn.cursor()
+
+            cursor.execute("INSERT INTO položka (title, zakazka, podsestava) VALUES (?, ?, ?)",
+                        (title, zakazka_id, 1))
+            
+            # Get the ID of the newly inserted podsestava
+            polozka_id = cursor.lastrowid  
+
+            conn.commit()
+            conn.close()
+
+            # Refresh table
+            self.polozka_model.select()
+
+            # Automatically generate number for the new podsestava
+            self.generate_number(self.polozka_model.rowCount() - 1)  # Pass the last row index
+
+    def show_polozka_context_menu(self, position):
         """Shows context menu on right-click in the položka table."""
         index = self.polozka_table.indexAt(position)
         if not index.isValid():
@@ -189,7 +349,7 @@ class PDFImporterApp(QWidget):
         selected_indexes = self.zakazka_table.selectionModel().selectedRows()
         if selected_indexes:
             # Get the selected zakazka_nuber
-            zakazka_number = self.zakazka_model.data(selected_indexes[0].siblingAtColumn(1), Qt.DisplayRole)
+            zakazka_number = self.zakazka_model.data(selected_indexes[0], Qt.DisplayRole)
             self.polozka_filter_model.setFilterFixedString(str(zakazka_number))
             
         else:
@@ -219,7 +379,8 @@ class PDFImporterApp(QWidget):
                 INSERT INTO zakázka (number, title) VALUES (?, ?)
             ''', (zakazka_data[0][0], zakazka_data[1][0]))
             
-            zakazka_id = zakazka_data[0][0]  # Get the last inserted ID for foreign key
+            # zakazka_id = zakazka_data[0][0]  # Get zakazka nuber as foreign key
+            zakazka_id = cursor.lastrowid # Get the last inserted ID for foreign key
             
             # Insert položka data
             for item in data['položky']:
