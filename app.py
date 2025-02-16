@@ -152,7 +152,6 @@ class PDFImporterApp(QWidget):
         self.polozka_table.setItemDelegate(QSqlRelationalDelegate(self.polozka_table))  # Enables dropdown for relations
         self.polozka_table.hideColumn(0)
         self.polozka_table.hideColumn(4)
-        self.polozka_table.hideColumn(6)
         self.polozka_table.setSortingEnabled(True)
         self.polozka_table.sortByColumn(6, Qt.DescendingOrder)
         self.polozka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -161,7 +160,7 @@ class PDFImporterApp(QWidget):
         self.polozka_table.setColumnWidth(2, 350)
         self.polozka_table.setColumnWidth(3, 30)
         self.polozka_table.setColumnWidth(5, 150)
-        self.polozka_table.setColumnWidth(6, 80)
+        self.polozka_table.setColumnWidth(6, 150)
 
         # Model pro filtrování podle ID zakázky
         self.polozka_filter_helper = QSqlQueryModel()
@@ -240,6 +239,7 @@ class PDFImporterApp(QWidget):
     def add_podsestava(self, row):
         """Opens a dialog to add a new podsestava and saves it to the database."""
         zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
+        print(f"prvni {zakazka_id}")
 
         dialog = AddPodsestavaDialog(zakazka_id, self)
         if dialog.exec():
@@ -260,10 +260,6 @@ class PDFImporterApp(QWidget):
             # Refresh table
             self.update_polozka_table()
 
-            # Automatically generate number for the new podsestava
-            self.generate_number(self.polozka_model.rowCount() - 1)  # Pass the last row index
-
-
     def show_polozka_context_menu(self, position):
         """Shows context menu on right-click in the položka table."""
         index = self.polozka_table.indexAt(position)
@@ -274,53 +270,60 @@ class PDFImporterApp(QWidget):
 
         action = menu.exec(self.polozka_table.viewport().mapToGlobal(position))
         if action == action_generate_number:
-            self.generate_number(index.row())
+            self.generate_vykres(index.row())
 
-    def generate_number(self, row):
-        """Generates and assigns a number in the format K-{zakazka.number}-{unique_number}."""
-        zakazka_index = self.polozka_filter_model.index(row, 4)  # Get zakazka column (foreign key)
-        polozka_id_index = self.polozka_filter_model.index(row, 0)  # Get polozka ID column
+    def generate_vykres(self, row):
+        """Generuje hodnotu vykres pro položku na daném řádku, pokud ještě není vyplněna."""
+        # Získání indexu vybrané položky podle řádku
+        index = self.polozka_filter_model.index(row, 0)  # Sloupec 0 je ID položky
+        item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
 
-        zakazka_id = self.polozka_filter_model.data(zakazka_index)
-        polozka_id = self.polozka_filter_model.data(polozka_id_index)
-
-        if zakazka_id is None or polozka_id is None:
-            return
-
+        # Připojení k databázi
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
 
-        # Get zakázka number using zakazka_id
-        cursor.execute("SELECT number FROM zakázka WHERE title = ?", (zakazka_id,))
-        zakazka_number = cursor.fetchone()
-
-        if zakazka_number is None:
+        # Kontrola, jestli už vykres existuje
+        cursor.execute("SELECT vykres FROM položka WHERE id = ?", (item_id,))
+        existing_vykres = cursor.fetchone()
+        if existing_vykres and existing_vykres[0]:  # Pokud existuje a není prázdný
+            QMessageBox.warning(self, "Upozornění", "Tato položka již má číslo výkresu.")
             conn.close()
             return
 
-        zakazka_number = zakazka_number[0]  # Extract the actual number from the tuple
+        # Získání ID zakázky
+        zakazka_id = self.polozka_filter_model.data(index.siblingAtColumn(4), Qt.DisplayRole)
 
-        # Get the highest existing number assigned for this zakázka
-        cursor.execute("SELECT vykres FROM položka WHERE zakazka = ? AND vykres LIKE ?", 
-                    (zakazka_id, f"K-{zakazka_number}-%"))
-        existing_numbers = cursor.fetchall()
+        # Získání čísla zakázky
+        cursor.execute("SELECT number FROM zakázka WHERE id = ?", (zakazka_id,))
+        zakazka_number = cursor.fetchone()
+        if not zakazka_number:
+            QMessageBox.warning(self, "Upozornění", "Nelze najít číslo zakázky.")
+            conn.close()
+            return
+        zakazka_number = zakazka_number[0][:3]
 
-        # Find the next available vykres number
-        next_number = 1
-        if existing_numbers:
-            existing_numbers = [int(num[0].split('-')[-1]) for num in existing_numbers if num[0] and num[0].startswith(f"K-{zakazka_number}-")]
-            if existing_numbers:
-                next_number = max(existing_numbers) + 1
+        # Získání nejvyššího čísla pro danou zakázku
+        cursor.execute("""
+            SELECT vykres FROM položka 
+            WHERE zakazka = ? AND vykres LIKE ?
+            ORDER BY vykres DESC LIMIT 1
+        """, (zakazka_id, f"K-{zakazka_number}-%"))
+        last_vykres = cursor.fetchone()
+        if last_vykres:
+            # Extrahování posledního čísla
+            last_number = int(last_vykres[0].split('-')[-1])
+            new_number = last_number + 1
+        else:
+            new_number = 1
 
-        generated_number = f"K-{zakazka_number}-{next_number:02d}"
+        # Vygenerování nového čísla
+        new_vykres = f"K-{zakazka_number}-{new_number:02d}"
 
-        # Update the database
-        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ? AND (vykres IS NULL OR vykres = '')", 
-                    (generated_number, polozka_id))
+        # Aktualizace hodnoty v databázi
+        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ?", (new_vykres, item_id))
         conn.commit()
         conn.close()
 
-        # Refresh model
         self.update_polozka_table()
 
 
