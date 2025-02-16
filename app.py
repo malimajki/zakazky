@@ -1,69 +1,15 @@
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QFormLayout, QSpinBox, QDialogButtonBox, QDialog, QStyledItemDelegate
-from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel, QSqlRelationalDelegate, QSqlRelation
-from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel, QSqlRelationalDelegate, QSqlRelation, QSqlQueryModel
+from PySide6.QtCore import QSortFilterProxyModel, Qt, QRegularExpression
 from PySide6.QtGui import QBrush
 import sys
 import sqlite3
 
-from pdf2data import extract_data_from_pdf
+from functions.pdf2data import extract_data_from_pdf
+from classes.nova_zakazka_dialog import NovaZakazkaDialog
+from classes.nova_polozka_dialog import AddPolozkaDialog
+from classes.nova_podsestava_dialog import AddPodsestavaDialog
 
-class AddPolozkaDialog(QDialog):
-    """Dialog window for adding a new položka."""
-    def __init__(self, zakazka_id, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Přidat novou položku")
-        self.zakazka_id = zakazka_id
-
-        layout = QFormLayout()
-
-        self.number_input = QLineEdit()
-        self.number_input.setPlaceholderText("Číslo")
-
-        self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("Název")
-
-        self.ks_input = QSpinBox()
-        self.ks_input.setMinimum(1)
-
-        layout.addRow("Číslo:", self.number_input)
-        layout.addRow("Název:", self.title_input)
-        layout.addRow("Ks:", self.ks_input)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-
-        layout.addWidget(buttons)
-        self.setLayout(layout)
-
-    def get_data(self):
-        """Returns the entered data."""
-        return self.number_input.text().strip(), self.title_input.text().strip(), self.ks_input.value()
-    
-class AddPodsestavaDialog(QDialog):
-    """Dialog window for adding a new podsestava."""
-    def __init__(self, zakazka_id, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Přidat novou podsestavu")
-        self.zakazka_id = zakazka_id
-
-        layout = QFormLayout()
-
-        self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("Název")
-
-        layout.addRow("Název:", self.title_input)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-
-        layout.addWidget(buttons)
-        self.setLayout(layout)
-
-    def get_data(self):
-        """Returns the entered data."""
-        return self.title_input.text().strip()
 
 class PDFImporterApp(QWidget):
     def __init__(self):
@@ -89,6 +35,12 @@ class PDFImporterApp(QWidget):
         # Add stretch between input and button
         search_layout.addStretch()
 
+        self.new_order_button = QPushButton("Nová zakázka")
+        self.new_order_button.setFixedWidth(200)
+        self.new_order_button.clicked.connect(self.vytvorit_zakazku)
+        search_layout.addWidget(self.new_order_button)
+
+
         # Button at the bottom
         self.import_button = QPushButton("Nahrát objednávku")
         self.import_button.setFixedWidth(200)
@@ -112,13 +64,10 @@ class PDFImporterApp(QWidget):
         self.podpolozka_label = QLabel("Podsestavy")
         self.polozka_table = QTableView()
 
-        self.polozka_table.setFixedWidth(650)
+        self.polozka_table.setFixedWidth(850)
         self.podpolozka_table = QTableView()
-        self.podpolozka_table.setFixedWidth(650)
         polozka_layout.addWidget(self.polozka_label)
         polozka_layout.addWidget(self.polozka_table)
-        # polozka_layout.addWidget(self.podpolozka_label)
-        # polozka_layout.addWidget(self.podpolozka_table)
         layout.addLayout(polozka_layout)
 
 
@@ -162,7 +111,6 @@ class PDFImporterApp(QWidget):
                 ks INTEGER,
                 zakazka INTEGER,
                 vykres TEXT NULL,
-                podsestava BOOLEAN NOT NULL DEFAULT 0,
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
             )
         ''')
@@ -183,8 +131,7 @@ class PDFImporterApp(QWidget):
         self.zakazka_model.select()  # Load the data
         self.zakazka_model.setHeaderData(1, Qt.Orientation.Horizontal, "Číslo")
         self.zakazka_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
-
-
+        
         self.zakazka_table.setModel(self.zakazka_model)
         self.zakazka_table.selectionModel().selectionChanged.connect(self.zakazka_changed)
         self.zakazka_table.hideColumn(0)
@@ -192,45 +139,64 @@ class PDFImporterApp(QWidget):
         self.zakazka_table.verticalHeader().setVisible(False)
         self.zakazka_table.setColumnWidth(1, 80)
         self.zakazka_table.setColumnWidth(2, 250)
+        self.zakazka_model.dataChanged.connect(self.update_polozka_table)
 
         # Polozka model
         self.polozka_model = QSqlRelationalTableModel(self, db)
         self.polozka_model.setTable("položka")
-
         self.polozka_model.setRelation(4, QSqlRelation("zakázka", "id", "title"))
-
         self.polozka_model.select()  # Load the data
-
-        # Set headers
-        self.polozka_model.setHeaderData(1, Qt.Orientation.Horizontal, "Číslo")
-        self.polozka_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
-        self.polozka_model.setHeaderData(3, Qt.Orientation.Horizontal, "Ks")
-        self.polozka_model.setHeaderData(4, Qt.Orientation.Horizontal, "Zakázka")
-        self.polozka_model.setHeaderData(5, Qt.Orientation.Horizontal, "Výkres")
 
         # Assign to table
         self.polozka_table.setModel(self.polozka_model)
         self.polozka_table.setItemDelegate(QSqlRelationalDelegate(self.polozka_table))  # Enables dropdown for relations
         self.polozka_table.hideColumn(0)
+        self.polozka_table.hideColumn(4)
         self.polozka_table.hideColumn(6)
         self.polozka_table.setSortingEnabled(True)
-        self.polozka_table.sortByColumn(5, Qt.DescendingOrder)
+        self.polozka_table.sortByColumn(6, Qt.DescendingOrder)
         self.polozka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.polozka_table.verticalHeader().setVisible(False)
         self.polozka_table.setColumnWidth(1, 70)
         self.polozka_table.setColumnWidth(2, 350)
         self.polozka_table.setColumnWidth(3, 30)
-        self.polozka_table.setColumnWidth(4, 150)
-        self.polozka_table.setColumnWidth(5, 80)
+        self.polozka_table.setColumnWidth(5, 150)
+        self.polozka_table.setColumnWidth(6, 80)
 
-        # Proxy model for filtering polozka
+        # Model pro filtrování podle ID zakázky
+        self.polozka_filter_helper = QSqlQueryModel()
+        self.polozka_filter_helper.setQuery('''
+            SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres
+            FROM položka p
+            LEFT JOIN zakázka z ON p.zakazka = z.id
+        ''')
+
         self.polozka_filter_model = QSortFilterProxyModel(self)
-        self.polozka_filter_model.setSourceModel(self.polozka_model)
+        self.polozka_filter_model.setSourceModel(self.polozka_filter_helper)
         self.polozka_filter_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.polozka_filter_model.setFilterKeyColumn(4)  # Filter based on the zakazka_number (4th column in the polozka table)
+        self.polozka_filter_model.setFilterKeyColumn(-1)
         self.polozka_filter_model.setFilterFixedString("")  # No filter initially
 
+                # Set headers
+        self.polozka_filter_model.setHeaderData(1, Qt.Orientation.Horizontal, "Číslo")
+        self.polozka_filter_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
+        self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Ks")
+        self.polozka_filter_model.setHeaderData(5, Qt.Orientation.Horizontal, "Zakázka")
+        self.polozka_filter_model.setHeaderData(6, Qt.Orientation.Horizontal, "Výkres")
+
         self.polozka_table.setModel(self.polozka_filter_model)
+
+    def update_polozka_table(self):
+        """Aktualizuje tabulku položek po změně názvu zakázky."""
+        self.zakazka_model.submitAll()     # Uloží změny v zakazka_model
+        self.polozka_model.select()        # Načte znovu data v polozka_model
+        self.polozka_filter_model.invalidate()  # Obnoví proxy model
+        self.polozka_filter_helper.setQuery('''
+                SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres
+                FROM položka p
+                LEFT JOIN zakázka z ON p.zakazka = z.id
+            ''')
+
 
     def show_zakazka_context_menu(self, position):
         """Shows context menu on right-click in the zakazka table."""
@@ -269,7 +235,7 @@ class PDFImporterApp(QWidget):
             conn.close()
 
             # Refresh table
-            self.polozka_model.select()
+            self.update_polozka_table()
 
     def add_podsestava(self, row):
         """Opens a dialog to add a new podsestava and saves it to the database."""
@@ -285,20 +251,18 @@ class PDFImporterApp(QWidget):
             conn = sqlite3.connect("database.db")
             cursor = conn.cursor()
 
-            cursor.execute("INSERT INTO položka (title, zakazka, podsestava) VALUES (?, ?, ?)",
-                        (title, zakazka_id, 1))
-            
-            # Get the ID of the newly inserted podsestava
-            polozka_id = cursor.lastrowid  
+            cursor.execute("INSERT INTO položka (title, zakazka) VALUES (?, ?)",
+                        (title, zakazka_id))
 
             conn.commit()
             conn.close()
 
             # Refresh table
-            self.polozka_model.select()
+            self.update_polozka_table()
 
             # Automatically generate number for the new podsestava
             self.generate_number(self.polozka_model.rowCount() - 1)  # Pass the last row index
+
 
     def show_polozka_context_menu(self, position):
         """Shows context menu on right-click in the položka table."""
@@ -313,7 +277,7 @@ class PDFImporterApp(QWidget):
             self.generate_number(index.row())
 
     def generate_number(self, row):
-        """Generates and assigns a number in the format K-{zakazka}-{unique_number}."""
+        """Generates and assigns a number in the format K-{zakazka.number}-{unique_number}."""
         zakazka_index = self.polozka_filter_model.index(row, 4)  # Get zakazka column (foreign key)
         polozka_id_index = self.polozka_filter_model.index(row, 0)  # Get polozka ID column
 
@@ -326,43 +290,54 @@ class PDFImporterApp(QWidget):
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
 
-        # Get the highest number assigned for this zakazka
-        cursor.execute("SELECT vykres FROM položka WHERE zakazka = ? AND vykres LIKE ?", (zakazka_id, f"K-{zakazka_id[:3]}-%"))
+        # Get zakázka number using zakazka_id
+        cursor.execute("SELECT number FROM zakázka WHERE title = ?", (zakazka_id,))
+        zakazka_number = cursor.fetchone()
+
+        if zakazka_number is None:
+            conn.close()
+            return
+
+        zakazka_number = zakazka_number[0]  # Extract the actual number from the tuple
+
+        # Get the highest existing number assigned for this zakázka
+        cursor.execute("SELECT vykres FROM položka WHERE zakazka = ? AND vykres LIKE ?", 
+                    (zakazka_id, f"K-{zakazka_number}-%"))
         existing_numbers = cursor.fetchall()
 
-        # Find the next available vykres
+        # Find the next available vykres number
         next_number = 1
         if existing_numbers:
-            existing_numbers = [int(num[0].split('-')[-1]) for num in existing_numbers if num[0] and num[0].startswith(f"K-{zakazka_id[:3]}-")]
+            existing_numbers = [int(num[0].split('-')[-1]) for num in existing_numbers if num[0] and num[0].startswith(f"K-{zakazka_number}-")]
             if existing_numbers:
                 next_number = max(existing_numbers) + 1
 
-        generated_number = f"K-{zakazka_id[:3]}-{next_number:02d}"
+        generated_number = f"K-{zakazka_number}-{next_number:02d}"
 
         # Update the database
-        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ? AND (vykres IS NULL OR vykres = '')", (generated_number, polozka_id))
+        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ? AND (vykres IS NULL OR vykres = '')", 
+                    (generated_number, polozka_id))
         conn.commit()
         conn.close()
 
         # Refresh model
-        self.polozka_model.select()
+        self.update_polozka_table()
 
 
     def on_search_text_changed(self, text):
         """Triggered when the search input changes."""
-        self.polozka_filter_model.setFilterFixedString(text)
+        regex = QRegularExpression(text, QRegularExpression.PatternOption.CaseInsensitiveOption)
+        self.polozka_filter_model.setFilterRegularExpression(regex)
 
     def zakazka_changed(self):
         selected_indexes = self.zakazka_table.selectionModel().selectedRows()
         if selected_indexes:
-            # Get the selected zakazka_nuber
-            zakazka_number = self.zakazka_model.data(selected_indexes[0], Qt.DisplayRole)
-            self.polozka_filter_model.setFilterFixedString(str(zakazka_number))
-            
+            # Získání ID vybrané zakázky (první sloupec je ID, ale je skrytý)
+            zakazka_id = self.zakazka_model.data(selected_indexes[0].siblingAtColumn(0), Qt.DisplayRole)
+            self.polozka_filter_model.setFilterKeyColumn(4)  # Filtruj podle sloupce `zakazka` v tabulce položka
+            self.polozka_filter_model.setFilterFixedString(str(zakazka_id))
         else:
-            # No customer selected, clear the car view
             self.polozka_filter_model.setFilterFixedString("")
-
 
     def import_pdf(self):
         """Handles PDF import and data extraction."""
@@ -413,7 +388,39 @@ class PDFImporterApp(QWidget):
 
         # Refresh the models to reflect changes
         self.zakazka_model.select()
-        self.polozka_model.select()
+        self.update_polozka_table()
+
+    def vytvorit_zakazku(self):
+        # Otevření vlastního dialogu
+        dialog = NovaZakazkaDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            nazev, cislo = dialog.get_data()
+            
+            # Kontrola, zda jsou vyplněna obě pole
+            if not nazev or not cislo:
+                QMessageBox.warning(self, "Neplatné údaje", "Vyplňte prosím název i číslo zakázky.")
+                return
+            
+            # Kontrola duplicitního čísla zakázky
+            conn = sqlite3.connect('database.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM zakázka WHERE number = ?", (cislo,))
+            if cursor.fetchone()[0] > 0:
+                QMessageBox.warning(self, "Duplicitní číslo", "Zakázka s tímto číslem již existuje.")
+                conn.close()
+                return
+            
+            # Uložení nové zakázky do databáze
+            cursor.execute("INSERT INTO zakázka (title, number) VALUES (?, ?)", (nazev, cislo))
+            conn.commit()
+            conn.close()
+            
+            QMessageBox.information(self, "Zakázka vytvořena", f"Zakázka '{nazev}' byla vytvořena.")
+            
+            # Aktualizace tabulky zakázek
+            self.zakazka_model.select()
+            self.update_polozka_table()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
