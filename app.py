@@ -1,7 +1,7 @@
-from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QFormLayout, QSpinBox, QDialogButtonBox, QDialog, QStyledItemDelegate
-from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel, QSqlRelationalDelegate, QSqlRelation, QSqlQueryModel
+from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QDialog
+from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel, QSqlRelationalDelegate, QSqlRelation, QSqlQueryModel, QSqlQuery
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QRegularExpression
-from PySide6.QtGui import QBrush
+from PySide6.QtGui import QAction
 import sys
 import sqlite3
 
@@ -9,6 +9,7 @@ from functions.pdf2data import extract_data_from_pdf
 from classes.nova_zakazka_dialog import NovaZakazkaDialog
 from classes.nova_polozka_dialog import AddPolozkaDialog
 from classes.nova_podsestava_dialog import AddPodsestavaDialog
+from classes.edit_polozka_dialog import EditItemDialog
 
 
 class PDFImporterApp(QWidget):
@@ -110,13 +111,23 @@ class PDFImporterApp(QWidget):
                 title TEXT,
                 ks INTEGER,
                 zakazka INTEGER,
-                vykres TEXT NULL,
+                vykres TEXT NULL UNIQUE,
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
             )
         ''')
         
         conn.commit()
         conn.close()
+
+    def get_db_connection():
+        if not QSqlDatabase.contains("qt_sql_default_connection"):
+            db = QSqlDatabase.addDatabase("QSQLITE")
+            db.setDatabaseName("database.db")
+            if not db.open():
+                print("Chyba při otevírání databáze")
+            return db
+        else:
+            return QSqlDatabase.database("qt_sql_default_connection")
 
     def setup_models(self):
         """Sets up the models for the tables."""
@@ -145,7 +156,8 @@ class PDFImporterApp(QWidget):
         self.polozka_model = QSqlRelationalTableModel(self, db)
         self.polozka_model.setTable("položka")
         self.polozka_model.setRelation(4, QSqlRelation("zakázka", "id", "title"))
-        self.polozka_model.select()  # Load the data
+        self.polozka_model.select()
+        self.polozka_model.setEditStrategy(QSqlTableModel.OnFieldChange)
 
         # Assign to table
         self.polozka_table.setModel(self.polozka_model)
@@ -168,7 +180,7 @@ class PDFImporterApp(QWidget):
             SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres
             FROM položka p
             LEFT JOIN zakázka z ON p.zakazka = z.id
-        ''')
+        ''') 
 
         self.polozka_filter_model = QSortFilterProxyModel(self)
         self.polozka_filter_model.setSourceModel(self.polozka_filter_helper)
@@ -239,7 +251,6 @@ class PDFImporterApp(QWidget):
     def add_podsestava(self, row):
         """Opens a dialog to add a new podsestava and saves it to the database."""
         zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
-        print(f"prvni {zakazka_id}")
 
         dialog = AddPodsestavaDialog(zakazka_id, self)
         if dialog.exec():
@@ -265,12 +276,59 @@ class PDFImporterApp(QWidget):
         index = self.polozka_table.indexAt(position)
         if not index.isValid():
             return
+
+        # Vytvoření kontextového menu
         menu = QMenu(self)
+        
+        # Původní akce
         action_generate_number = menu.addAction("Generovat číslo")
 
+        # Nová akce pro editaci položky
+        action_edit_item = menu.addAction("Editovat položku")
+
+        # Zobrazení menu a zachycení vybrané akce
         action = menu.exec(self.polozka_table.viewport().mapToGlobal(position))
+
+        # Akce pro "Generovat číslo"
         if action == action_generate_number:
             self.generate_vykres(index.row())
+        
+        # Akce pro "Editovat položku"
+        if action == action_edit_item:
+            self.edit_selected_item()
+
+
+    def edit_selected_item(self):
+
+        def get_db_connection():
+            if not QSqlDatabase.contains("qt_sql_default_connection"):
+                db = QSqlDatabase.addDatabase("QSQLITE")
+                db.setDatabaseName("database.db")
+                if not db.open():
+                    print("Chyba při otevírání databáze")
+                return db
+            else:
+                return QSqlDatabase.database("qt_sql_default_connection")
+
+        self.db = get_db_connection()
+
+        if not self.db.open():
+            print("Chyba při otevírání databáze")
+
+        index = self.polozka_table.currentIndex()
+        if not index.isValid():
+            return
+
+        source_index = self.polozka_filter_model.mapToSource(index)
+        polozka_id = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 0))
+        current_number = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 1))
+        current_title = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 2))
+        current_vykres = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 6))
+
+        dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, self)
+        if dialog.exec():
+            self.polozka_model.select()
+            self.polozka_filter_helper.setQuery(self.polozka_filter_helper.query().executedQuery())  # Refresh filter model
 
     def generate_vykres(self, row):
         """Generuje hodnotu vykres pro položku na daném řádku, pokud ještě není vyplněna."""
