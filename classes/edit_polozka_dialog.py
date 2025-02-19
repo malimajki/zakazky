@@ -8,7 +8,7 @@ class EditItemDialog(QDialog):
         self.polozka_id = polozka_id
 
         self.setWindowTitle("Editace položky")
-        self.setFixedSize(300, 200)
+        self.setFixedSize(300, 270)
 
         layout = QVBoxLayout()
 
@@ -37,6 +37,8 @@ class EditItemDialog(QDialog):
         new_number = self.input_number.text()
         new_title = self.input_title.text()
         new_vykres = self.input_vykres.text()
+        if new_vykres == "":
+            new_vykres = None
 
         query = QSqlQuery(self.db)
         query.prepare("UPDATE položka SET number = ?, title = ?, vykres = ? WHERE id = ?")

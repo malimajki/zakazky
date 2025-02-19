@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QDialog
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel, QSqlRelationalDelegate, QSqlRelation, QSqlQueryModel, QSqlQuery
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QRegularExpression
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QIcon
 import sys
 import sqlite3
 
@@ -15,9 +15,6 @@ from classes.edit_polozka_dialog import EditItemDialog
 class PDFImporterApp(QWidget):
     def __init__(self):
         super().__init__()
-
-        self.setWindowTitle("Zakázky")
-        
         layout = QHBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
@@ -287,14 +284,11 @@ class PDFImporterApp(QWidget):
         if not index.isValid():
             return
 
-        # Vytvoření kontextového menu
         menu = QMenu(self)
         
-        # Původní akce
         action_generate_number = menu.addAction("Generovat číslo")
-
-        # Nová akce pro editaci položky
         action_edit_item = menu.addAction("Editovat položku")
+        action_delete_polozka = menu.addAction("Smazat položku")
 
         # Zobrazení menu a zachycení vybrané akce
         action = menu.exec(self.polozka_table.viewport().mapToGlobal(position))
@@ -304,8 +298,11 @@ class PDFImporterApp(QWidget):
             self.generate_vykres(index.row())
         
         # Akce pro "Editovat položku"
-        if action == action_edit_item:
+        elif action == action_edit_item:
             self.edit_selected_item()
+
+        elif action == action_delete_polozka:
+            self.delete_selected_polozka()
 
 
     def edit_selected_item(self):
@@ -398,14 +395,49 @@ class PDFImporterApp(QWidget):
 
         self.update_polozka_table()
 
+    def delete_selected_polozka(self):
+        """Deletes the selected položka from the database."""
+        selected_indexes = self.polozka_table.selectionModel().selectedRows()
+        if not selected_indexes:
+            QMessageBox.warning(self, "Smazání položky", "Nevybrali jste žádnou položku k odstranění.")
+            return
 
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Smazání položky")
+        msg_box.setText("Opravdu chcete smazat vybranou položku?")
+        yes_button = msg_box.addButton("Ano", QMessageBox.YesRole)
+        no_button = msg_box.addButton("Ne", QMessageBox.NoRole)
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.exec()
+
+        if msg_box.clickedButton() == yes_button:
+            db = QSqlDatabase.database()
+            if not db.isOpen():
+                QMessageBox.critical(self, "Chyba databáze", "Databáze není otevřená!")
+                return
+
+            query = QSqlQuery(db)
+            for index in selected_indexes:
+                row = index.row()
+                id_index = self.polozka_filter_model.index(row, 0)  # Sloupec 0 obsahuje ID
+                polozka_id = self.polozka_filter_model.data(id_index)
+
+                query.prepare("DELETE FROM položka WHERE id = ?")
+                query.addBindValue(polozka_id)
+                if not query.exec():
+                    QMessageBox.critical(self, "Chyba", f"Nepodařilo se smazat položku: {query.lastError().text()}")
+                    return
+
+            # Obnovíme model, aby se změny zobrazily
+            self.polozka_filter_helper.setQuery(self.polozka_filter_helper.query().executedQuery()) 
 
     def on_search_text_changed(self, text):
         """Triggered when the search input changes."""
         # Nastaví regulární výraz s textem (case insensitive)
+        self.polozka_filter_model.setFilterKeyColumn(-1)
         regex = QRegularExpression(text, QRegularExpression.PatternOption.CaseInsensitiveOption)
         self.polozka_filter_model.setFilterRegularExpression(regex)
-        
+
 
     def zakazka_changed(self):
         selected_indexes = self.zakazka_table.selectionModel().selectedRows()
@@ -502,6 +534,8 @@ class PDFImporterApp(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon("helpers/logo.ico"))
     window = PDFImporterApp()
+    window.setWindowTitle("Konstrukční dokumentace")
     window.show()
     sys.exit(app.exec())
