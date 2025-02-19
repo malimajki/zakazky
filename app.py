@@ -165,7 +165,6 @@ class PDFImporterApp(QWidget):
         self.polozka_table.hideColumn(0)
         self.polozka_table.hideColumn(4)
         self.polozka_table.setSortingEnabled(True)
-        self.polozka_table.sortByColumn(6, Qt.DescendingOrder)
         self.polozka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.polozka_table.verticalHeader().setVisible(False)
         self.polozka_table.setColumnWidth(1, 70)
@@ -194,6 +193,7 @@ class PDFImporterApp(QWidget):
         self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Ks")
         self.polozka_filter_model.setHeaderData(5, Qt.Orientation.Horizontal, "Zakázka")
         self.polozka_filter_model.setHeaderData(6, Qt.Orientation.Horizontal, "Výkres")
+        self.polozka_filter_model.sort(6, Qt.AscendingOrder)
 
         self.polozka_table.setModel(self.polozka_filter_model)
 
@@ -265,11 +265,21 @@ class PDFImporterApp(QWidget):
             cursor.execute("INSERT INTO položka (title, zakazka) VALUES (?, ?)",
                         (title, zakazka_id))
 
+            new_item_id = cursor.lastrowid
+
             conn.commit()
             conn.close()
 
             # Refresh table
             self.update_polozka_table()
+
+            # Najdi řádek nově vložené položky v modelu
+            for row in range(self.polozka_filter_model.rowCount()):
+                index = self.polozka_filter_model.index(row, 0)
+                item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
+                if item_id == new_item_id:
+                    self.generate_vykres(row)  # Zavolání funkce pro generování výkresu
+                    break
 
     def show_polozka_context_menu(self, position):
         """Shows context menu on right-click in the položka table."""
@@ -358,14 +368,18 @@ class PDFImporterApp(QWidget):
             QMessageBox.warning(self, "Upozornění", "Nelze najít číslo zakázky.")
             conn.close()
             return
-        zakazka_number = zakazka_number[0][:3]
+        zakazka_number = zakazka_number[0]
 
-        # Získání nejvyššího čísla pro danou zakázku
+        zakazka_prefix = zakazka_number[:3]  # Standardní tříznakový prefix
+
+        # Získání nejvyššího čísla pro danou skupinu zakázek
         cursor.execute("""
             SELECT vykres FROM položka 
-            WHERE zakazka = ? AND vykres LIKE ?
+            WHERE zakazka IN (SELECT id FROM zakázka WHERE number LIKE ?) 
+            AND vykres LIKE ?
             ORDER BY vykres DESC LIMIT 1
-        """, (zakazka_id, f"K-{zakazka_number}-%"))
+        """, (f"{zakazka_prefix}%", f"K-{zakazka_prefix}-%"))
+        
         last_vykres = cursor.fetchone()
         if last_vykres:
             # Extrahování posledního čísla
@@ -375,7 +389,7 @@ class PDFImporterApp(QWidget):
             new_number = 1
 
         # Vygenerování nového čísla
-        new_vykres = f"K-{zakazka_number}-{new_number:02d}"
+        new_vykres = f"K-{zakazka_prefix}-{new_number:02d}"
 
         # Aktualizace hodnoty v databázi
         cursor.execute("UPDATE položka SET vykres = ? WHERE id = ?", (new_vykres, item_id))
@@ -385,10 +399,13 @@ class PDFImporterApp(QWidget):
         self.update_polozka_table()
 
 
+
     def on_search_text_changed(self, text):
         """Triggered when the search input changes."""
+        # Nastaví regulární výraz s textem (case insensitive)
         regex = QRegularExpression(text, QRegularExpression.PatternOption.CaseInsensitiveOption)
         self.polozka_filter_model.setFilterRegularExpression(regex)
+        
 
     def zakazka_changed(self):
         selected_indexes = self.zakazka_table.selectionModel().selectedRows()
