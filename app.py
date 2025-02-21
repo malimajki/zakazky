@@ -141,6 +141,7 @@ class PDFImporterApp(QWidget):
         self.zakazka_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
         
         self.zakazka_table.setModel(self.zakazka_model)
+        self.zakazka_table.setSortingEnabled(True)
         self.zakazka_table.selectionModel().selectionChanged.connect(self.zakazka_changed)
         self.zakazka_table.hideColumn(0)
         self.zakazka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
