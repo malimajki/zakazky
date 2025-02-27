@@ -208,7 +208,7 @@ class PDFImporterApp(QWidget):
         self.polozka_table.setAlternatingRowColors(True)
         self.polozka_table.setStyleSheet("""
                 QTableView { 
-                    alternate-background-color: #c4c4c4;  /* Světle šedá */
+                    alternate-background-color: #D3D3D3;  /* Světle šedá */
                     background-color: #ffffff;  /* Bílá pro normální řádky */
                 }
             """)
