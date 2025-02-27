@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QDialog
+from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QTableView, QHBoxLayout, QAbstractItemView, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QMenu, QDialog, QStyledItemDelegate
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel, QSqlRelationalDelegate, QSqlRelation, QSqlQueryModel, QSqlQuery
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QRegularExpression
 from PySide6.QtGui import QIcon
@@ -11,6 +11,13 @@ from classes.nova_zakazka_dialog import NovaZakazkaDialog
 from classes.nova_polozka_dialog import AddPolozkaDialog
 from classes.nova_podsestava_dialog import AddPodsestavaDialog
 from classes.edit_polozka_dialog import EditItemDialog
+
+
+class CenterAlignDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        if index.column() == 1:  # Pouze sloupec 1
+            option.displayAlignment = Qt.AlignCenter
 
 
 class PDFImporterApp(QWidget):
@@ -167,17 +174,18 @@ class PDFImporterApp(QWidget):
         self.polozka_table.setSortingEnabled(True)
         self.polozka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.polozka_table.verticalHeader().setVisible(False)
-        self.polozka_table.setColumnWidth(1, 70)
+        self.polozka_table.setColumnWidth(1, 90)
         self.polozka_table.setColumnWidth(2, 350)
-        self.polozka_table.setColumnWidth(3, 30)
-        self.polozka_table.setColumnWidth(5, 150)
-        self.polozka_table.setColumnWidth(6, 150)
-        self.polozka_table.setColumnWidth(7, 80)
+        self.polozka_table.setColumnWidth(3, 90)
+        self.polozka_table.setColumnWidth(5, 180)
+        self.polozka_table.setColumnWidth(6, 90)
+        self.polozka_table.setColumnWidth(7, 30)
+        self.polozka_table.setItemDelegateForColumn(1, CenterAlignDelegate(self.polozka_table))
 
         # Model pro filtrování podle ID zakázky
         self.polozka_filter_helper = QSqlQueryModel()
         self.polozka_filter_helper.setQuery('''
-            SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres, p.date
+            SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks
             FROM položka p
             LEFT JOIN zakázka z ON p.zakazka = z.id
         ''') 
@@ -188,14 +196,23 @@ class PDFImporterApp(QWidget):
         self.polozka_filter_model.setFilterKeyColumn(-1)
         self.polozka_filter_model.setFilterFixedString("")  # No filter initially
 
-                # Set headers
-        self.polozka_filter_model.setHeaderData(1, Qt.Orientation.Horizontal, "Číslo")
+        # Set headers
+        self.polozka_filter_model.setHeaderData(1, Qt.Orientation.Horizontal, "Výkres")
         self.polozka_filter_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
-        self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Ks")
+        self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Číslo")
         self.polozka_filter_model.setHeaderData(5, Qt.Orientation.Horizontal, "Zakázka")
-        self.polozka_filter_model.setHeaderData(6, Qt.Orientation.Horizontal, "Výkres")
-        self.polozka_filter_model.setHeaderData(7, Qt.Orientation.Horizontal, "Datum")
-        self.polozka_filter_model.sort(6, Qt.AscendingOrder)
+        self.polozka_filter_model.setHeaderData(6, Qt.Orientation.Horizontal, "Datum")
+        self.polozka_filter_model.setHeaderData(7, Qt.Orientation.Horizontal, "Ks")
+        self.polozka_filter_model.sort(1, Qt.AscendingOrder)
+
+        self.polozka_table.setAlternatingRowColors(True)
+        self.polozka_table.setStyleSheet("""
+                QTableView { 
+                    alternate-background-color: #c4c4c4;  /* Světle šedá */
+                    background-color: #ffffff;  /* Bílá pro normální řádky */
+                }
+            """)
+
 
         self.polozka_table.setModel(self.polozka_filter_model)
 
@@ -205,7 +222,7 @@ class PDFImporterApp(QWidget):
         self.polozka_model.select()        # Načte znovu data v polozka_model
         self.polozka_filter_model.invalidate()  # Obnoví proxy model
         self.polozka_filter_helper.setQuery('''
-                SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres, p.date
+                SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks
                 FROM položka p
                 LEFT JOIN zakázka z ON p.zakazka = z.id
             ''')
@@ -498,10 +515,11 @@ class PDFImporterApp(QWidget):
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setWindowTitle("Duplicitní zakázka")
             msg_box.setText(f"Zakázka s číslem {zakazka_data[0][0]} již existuje! \nChcete přidat vybrané položky k již vytvořené zakázce?")
-            msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            yes_button = msg_box.addButton("Ano", QMessageBox.YesRole)
+            no_button = msg_box.addButton("Ne", QMessageBox.NoRole)
             result = msg_box.exec()
 
-            if result == QMessageBox.Yes:
+            if msg_box.clickedButton() == yes_button:
                 zakazka_number = zakazka_data[0][0]
                 cursor.execute("SELECT id FROM zakázka WHERE number = ?", (zakazka_number,))
                 result = cursor.fetchone()
