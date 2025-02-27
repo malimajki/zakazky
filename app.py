@@ -476,9 +476,10 @@ class PDFImporterApp(QWidget):
             cursor.execute('''
                 INSERT INTO zakázka (number, title) VALUES (?, ?)
             ''', (zakazka_data[0][0], zakazka_data[1][0]))
-            
+     
             # zakazka_id = zakazka_data[0][0]  # Get zakazka nuber as foreign key
             zakazka_id = cursor.lastrowid # Get the last inserted ID for foreign key
+            print (zakazka_id)
             
             # Insert položka data
             for item in data['položky']:
@@ -496,8 +497,27 @@ class PDFImporterApp(QWidget):
             msg_box = QMessageBox()
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setWindowTitle("Duplicitní zakázka")
-            msg_box.setText(f"Zakázka s číslem {zakazka_data[0][0]} již existuje!")
-            msg_box.exec()
+            msg_box.setText(f"Zakázka s číslem {zakazka_data[0][0]} již existuje! \nChcete přidat vybrané položky k již vytvořené zakázce?")
+            msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            result = msg_box.exec()
+
+            if result == QMessageBox.Yes:
+                zakazka_number = zakazka_data[0][0]
+                cursor.execute("SELECT id FROM zakázka WHERE number = ?", (zakazka_number,))
+                result = cursor.fetchone()
+                if result:  # Ověření, zda byl nalezen výsledek
+                    zakazka_id = result[0]  # Získání id z n-tice
+                else:
+                    zakazka_id = None  # Pokud žádný záznam neexistuje
+                
+                # Insert položka data
+                for item in data['položky']:
+                    cursor.execute('''
+                        INSERT INTO položka (number, title, ks, zakazka) 
+                        VALUES (?, ?, ?, ?)
+                    ''', (item[0][0], item[1][0], item[2][0], zakazka_id))
+            
+                conn.commit()
 
         finally:
             conn.close()
