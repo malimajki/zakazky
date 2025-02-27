@@ -4,6 +4,7 @@ from PySide6.QtCore import QSortFilterProxyModel, Qt, QRegularExpression
 from PySide6.QtGui import QIcon
 import sys
 import sqlite3
+from datetime import datetime
 
 from functions.pdf2data import extract_data_from_pdf
 from classes.nova_zakazka_dialog import NovaZakazkaDialog
@@ -62,7 +63,7 @@ class PDFImporterApp(QWidget):
         self.podpolozka_label = QLabel("Podsestavy")
         self.polozka_table = QTableView()
 
-        self.polozka_table.setFixedWidth(850)
+        self.polozka_table.setFixedWidth(900)
         self.podpolozka_table = QTableView()
         polozka_layout.addWidget(self.polozka_label)
         polozka_layout.addWidget(self.polozka_table)
@@ -109,6 +110,7 @@ class PDFImporterApp(QWidget):
                 ks INTEGER,
                 zakazka INTEGER,
                 vykres TEXT NULL UNIQUE,
+                date TEXT NULL,
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
             )
         ''')
@@ -170,11 +172,12 @@ class PDFImporterApp(QWidget):
         self.polozka_table.setColumnWidth(3, 30)
         self.polozka_table.setColumnWidth(5, 150)
         self.polozka_table.setColumnWidth(6, 150)
+        self.polozka_table.setColumnWidth(7, 80)
 
         # Model pro filtrování podle ID zakázky
         self.polozka_filter_helper = QSqlQueryModel()
         self.polozka_filter_helper.setQuery('''
-            SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres
+            SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres, p.date
             FROM položka p
             LEFT JOIN zakázka z ON p.zakazka = z.id
         ''') 
@@ -191,6 +194,7 @@ class PDFImporterApp(QWidget):
         self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Ks")
         self.polozka_filter_model.setHeaderData(5, Qt.Orientation.Horizontal, "Zakázka")
         self.polozka_filter_model.setHeaderData(6, Qt.Orientation.Horizontal, "Výkres")
+        self.polozka_filter_model.setHeaderData(7, Qt.Orientation.Horizontal, "Datum")
         self.polozka_filter_model.sort(6, Qt.AscendingOrder)
 
         self.polozka_table.setModel(self.polozka_filter_model)
@@ -201,7 +205,7 @@ class PDFImporterApp(QWidget):
         self.polozka_model.select()        # Načte znovu data v polozka_model
         self.polozka_filter_model.invalidate()  # Obnoví proxy model
         self.polozka_filter_helper.setQuery('''
-                SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres
+                SELECT p.id, p.number, p.title, p.ks, p.zakazka, z.title AS zakazka_name, p.vykres, p.date
                 FROM položka p
                 LEFT JOIN zakázka z ON p.zakazka = z.id
             ''')
@@ -388,9 +392,10 @@ class PDFImporterApp(QWidget):
 
         # Vygenerování nového čísla
         new_vykres = f"K-{zakazka_prefix}-{new_number:02d}"
+        current_date = datetime.today().strftime('%d. %m. %Y')
 
         # Aktualizace hodnoty v databázi
-        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ?", (new_vykres, item_id))
+        cursor.execute("UPDATE položka SET date = ?, vykres = ? WHERE id = ?", (current_date, new_vykres, item_id))
         conn.commit()
         conn.close()
 
