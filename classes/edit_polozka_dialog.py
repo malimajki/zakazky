@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox
 from PySide6.QtSql import QSqlQuery
+from datetime import datetime
 
 class EditItemDialog(QDialog):
     def __init__(self, db, polozka_id, number, title, vykres, parent=None):
@@ -37,14 +38,17 @@ class EditItemDialog(QDialog):
         new_number = self.input_number.text()
         new_title = self.input_title.text()
         new_vykres = self.input_vykres.text()
+        current_date = datetime.today().strftime('%d. %m. %Y')
         if new_vykres == "":
             new_vykres = None
+            current_date = None
 
         query = QSqlQuery(self.db)
-        query.prepare("UPDATE položka SET number = ?, title = ?, vykres = ? WHERE id = ?")
+        query.prepare("UPDATE položka SET number = ?, title = ?, vykres = ?, date=? WHERE id = ?")
         query.addBindValue(new_number)
         query.addBindValue(new_title)
         query.addBindValue(new_vykres)
+        query.addBindValue(current_date)
         query.addBindValue(self.polozka_id)
 
         if query.exec():

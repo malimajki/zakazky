@@ -11,7 +11,11 @@ from classes.nova_zakazka_dialog import NovaZakazkaDialog
 from classes.nova_polozka_dialog import AddPolozkaDialog
 from classes.nova_podsestava_dialog import AddPodsestavaDialog
 from classes.edit_polozka_dialog import EditItemDialog
+import ctypes
+import os
 
+myappid = 'VHZ-DIS.konstrukcni_dokumentace.1.0'  # název dle libosti
+ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
 class CenterAlignDelegate(QStyledItemDelegate):
     def initStyleOption(self, option, index):
@@ -20,7 +24,7 @@ class CenterAlignDelegate(QStyledItemDelegate):
             option.displayAlignment = Qt.AlignCenter
 
 
-class PDFImporterApp(QWidget):
+class NumberingOfDesignDocumentation(QWidget):
     def __init__(self):
         super().__init__()
         layout = QHBoxLayout()
@@ -32,10 +36,12 @@ class PDFImporterApp(QWidget):
         search_layout.setContentsMargins(10, 20, 10, 20)
 
         # Input at the top
+        self.search_input_label = QLabel("Vyhledávání v položkách:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pro vyhledávání začni psát")
         self.search_input.setFixedWidth(int(screen_width * 0.20))
         self.search_input.textChanged.connect(self.on_search_text_changed)
+        search_layout.addWidget(self.search_input_label)
         search_layout.addWidget(self.search_input)
 
         # Add stretch between input and button
@@ -116,7 +122,7 @@ class PDFImporterApp(QWidget):
                 title TEXT,
                 ks INTEGER,
                 zakazka INTEGER,
-                vykres TEXT NULL UNIQUE,
+                vykres TEXT NULL,
                 date TEXT NULL,
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
             )
@@ -151,6 +157,15 @@ class PDFImporterApp(QWidget):
         
         self.zakazka_table.setModel(self.zakazka_model)
         self.zakazka_table.setSortingEnabled(True)
+        self.zakazka_table.setAlternatingRowColors(True)
+        self.zakazka_table.setStyleSheet("""
+                QTableView { 
+                    alternate-background-color: #D3D3D3; 
+                    background-color: #ffffff; 
+                    selection-background-color: #357EC7;
+                    selection-color: #ffffff;
+                }
+            """)
         self.zakazka_table.selectionModel().selectionChanged.connect(self.zakazka_changed)
         self.zakazka_table.hideColumn(0)
         self.zakazka_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -350,9 +365,9 @@ class PDFImporterApp(QWidget):
 
         source_index = self.polozka_filter_model.mapToSource(index)
         polozka_id = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 0))
-        current_number = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 1))
+        current_number = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 3))
         current_title = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 2))
-        current_vykres = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 6))
+        current_vykres = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 1))
 
         dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, self)
         if dialog.exec():
@@ -577,9 +592,10 @@ class PDFImporterApp(QWidget):
 
 
 if __name__ == "__main__":
+    os.environ["QT_DISABLE_COLOR_SCHEME"] = "1"
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon("helpers/logo.ico"))
-    window = PDFImporterApp()
+    window = NumberingOfDesignDocumentation()
     window.setWindowTitle("Konstrukční dokumentace")
     window.show()
     sys.exit(app.exec())

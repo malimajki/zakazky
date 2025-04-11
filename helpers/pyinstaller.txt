@@ -6,3 +6,5 @@
   app.py  (name of your main python file)
 
 3. exe is located in the dist folder
+
+pyinstaller -F -w -i helpers/logo.ico app.py
