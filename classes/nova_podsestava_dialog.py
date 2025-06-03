@@ -18,6 +18,12 @@ class AddPodsestavaDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+
+        ok_button.setText("Vytvořit")
+        cancel_button.setText("Zrušit")
+
         layout.addWidget(buttons)
         self.setLayout(layout)
 

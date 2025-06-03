@@ -1,6 +1,8 @@
 import sqlite3
+import getpass
 
 def generate_number_call(self, row):
+        user = getpass.getuser().capitalize()
         """Generates and assigns a number in the format K-{zakazka.number}-{unique_number}."""
         zakazka_index = self.polozka_filter_model.index(row, 4)  # Get zakazka column (foreign key)
         polozka_id_index = self.polozka_filter_model.index(row, 0)  # Get polozka ID column
@@ -39,8 +41,8 @@ def generate_number_call(self, row):
         generated_number = f"K-{zakazka_number}-{next_number:02d}"
 
         # Update the database
-        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ? AND (vykres IS NULL OR vykres = '')", 
-                    (generated_number, polozka_id))
+        cursor.execute("UPDATE položka SET vykres = ? WHERE id = ? WHERE user=? AND (vykres IS NULL OR vykres = '')", 
+                    (generated_number, polozka_id, user))
         conn.commit()
         conn.close()
 

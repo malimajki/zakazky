@@ -12,10 +12,12 @@ from classes.nova_polozka_dialog import AddPolozkaDialog
 from classes.nova_podsestava_dialog import AddPodsestavaDialog
 from classes.edit_polozka_dialog import EditItemDialog
 import ctypes
-import os
+import getpass
 
-myappid = 'VHZ-DIS.konstrukcni_dokumentace.1.0'  # název dle libosti
+myappid = 'VHZ-DIS.konstrukcni_dokumentace.1.0'
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+# db_address="J:\Vývoj\database.db"
+db_address="database.db"
 
 class CenterAlignDelegate(QStyledItemDelegate):
     def initStyleOption(self, option, index):
@@ -65,7 +67,7 @@ class NumberingOfDesignDocumentation(QWidget):
         zakazka_layout = QVBoxLayout()
         self.zakazka_label = QLabel("Zakázky")
         self.zakazka_table = QTableView()
-        self.zakazka_table.setFixedWidth(340)
+        self.zakazka_table.setFixedWidth(330)
         zakazka_layout.addWidget(self.zakazka_label)
         zakazka_layout.addWidget(self.zakazka_table)
         layout.addLayout(zakazka_layout)
@@ -73,10 +75,9 @@ class NumberingOfDesignDocumentation(QWidget):
         # Table View for položka
         polozka_layout = QVBoxLayout()
         self.polozka_label = QLabel("Položky")
-        self.podpolozka_label = QLabel("Podsestavy")
         self.polozka_table = QTableView()
 
-        self.polozka_table.setFixedWidth(900)
+        self.polozka_table.setFixedWidth(960)
         self.podpolozka_table = QTableView()
         polozka_layout.addWidget(self.polozka_label)
         polozka_layout.addWidget(self.polozka_table)
@@ -102,7 +103,7 @@ class NumberingOfDesignDocumentation(QWidget):
 
     def initialize_database(self):
         """Creates the tables in the database."""
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(db_address)
         cursor = conn.cursor()
         
         # Create zakázka table
@@ -124,7 +125,9 @@ class NumberingOfDesignDocumentation(QWidget):
                 zakazka INTEGER,
                 vykres TEXT NULL,
                 date TEXT NULL,
+                user TEXT NULL, 
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
+                       
             )
         ''')
         
@@ -134,7 +137,7 @@ class NumberingOfDesignDocumentation(QWidget):
     def get_db_connection():
         if not QSqlDatabase.contains("qt_sql_default_connection"):
             db = QSqlDatabase.addDatabase("QSQLITE")
-            db.setDatabaseName("database.db")
+            db.setDatabaseName(db_address)
             if not db.open():
                 print("Chyba při otevírání databáze")
             return db
@@ -145,7 +148,7 @@ class NumberingOfDesignDocumentation(QWidget):
         """Sets up the models for the tables."""
         # Set up QSqlDatabase connection
         db = QSqlDatabase.addDatabase("QSQLITE")
-        db.setDatabaseName("database.db")
+        db.setDatabaseName(db_address)
         db.open()
 
         # Zakázka model
@@ -160,10 +163,10 @@ class NumberingOfDesignDocumentation(QWidget):
         self.zakazka_table.setAlternatingRowColors(True)
         self.zakazka_table.setStyleSheet("""
                 QTableView { 
-                    alternate-background-color: #D3D3D3; 
-                    background-color: #ffffff; 
-                    selection-background-color: #357EC7;
-                    selection-color: #ffffff;
+                    alternate-background-color: #2C2C2C; 
+                    background-color: #3b3b3b; 
+                    selection-background-color: #89CFF0;
+                    selection-color: #3b3b3b;
                 }
             """)
         self.zakazka_table.selectionModel().selectionChanged.connect(self.zakazka_changed)
@@ -194,13 +197,14 @@ class NumberingOfDesignDocumentation(QWidget):
         self.polozka_table.setColumnWidth(3, 90)
         self.polozka_table.setColumnWidth(5, 180)
         self.polozka_table.setColumnWidth(6, 90)
-        self.polozka_table.setColumnWidth(7, 30)
+        self.polozka_table.setColumnWidth(7, 40)
+        self.polozka_table.setColumnWidth(8, 90)
         self.polozka_table.setItemDelegateForColumn(1, CenterAlignDelegate(self.polozka_table))
 
         # Model pro filtrování podle ID zakázky
         self.polozka_filter_helper = QSqlQueryModel()
         self.polozka_filter_helper.setQuery('''
-            SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks
+            SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks, p.user
             FROM položka p
             LEFT JOIN zakázka z ON p.zakazka = z.id
         ''') 
@@ -214,17 +218,18 @@ class NumberingOfDesignDocumentation(QWidget):
         # Set headers
         self.polozka_filter_model.setHeaderData(1, Qt.Orientation.Horizontal, "Výkres")
         self.polozka_filter_model.setHeaderData(2, Qt.Orientation.Horizontal, "Název")
-        self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Číslo")
+        self.polozka_filter_model.setHeaderData(3, Qt.Orientation.Horizontal, "Položka")
         self.polozka_filter_model.setHeaderData(5, Qt.Orientation.Horizontal, "Zakázka")
         self.polozka_filter_model.setHeaderData(6, Qt.Orientation.Horizontal, "Datum")
         self.polozka_filter_model.setHeaderData(7, Qt.Orientation.Horizontal, "Ks")
+        self.polozka_filter_model.setHeaderData(8, Qt.Orientation.Horizontal, "Přidal")
         self.polozka_filter_model.sort(1, Qt.AscendingOrder)
 
         self.polozka_table.setAlternatingRowColors(True)
         self.polozka_table.setStyleSheet("""
                 QTableView { 
-                    alternate-background-color: #D3D3D3;  /* Světle šedá */
-                    background-color: #ffffff;  /* Bílá pro normální řádky */
+                    alternate-background-color: #2C2C2C;  /* Světle šedá */
+                    background-color: #3b3b3b;  /* Bílá pro normální řádky */
                 }
             """)
 
@@ -237,7 +242,7 @@ class NumberingOfDesignDocumentation(QWidget):
         self.polozka_model.select()        # Načte znovu data v polozka_model
         self.polozka_filter_model.invalidate()  # Obnoví proxy model
         self.polozka_filter_helper.setQuery('''
-                SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks
+                SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks, p.user
                 FROM položka p
                 LEFT JOIN zakázka z ON p.zakazka = z.id
             ''')
@@ -250,14 +255,66 @@ class NumberingOfDesignDocumentation(QWidget):
             return
 
         menu = QMenu(self)
+
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2C2C2C;
+                color: white;
+                border: 1px solid #444;
+            }
+            QMenu::item {
+                background-color: transparent;
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #444;
+            }
+        """)
+
         action_add_polozka = menu.addAction("Přidat položku")
         action_add_podsestava = menu.addAction("Přidat podsestavu")
+        action_delete_zakazka = menu.addAction("Smazat zakázku")
 
         action = menu.exec(self.zakazka_table.viewport().mapToGlobal(position))
         if action == action_add_polozka:
             self.add_polozka(index.row())
         if action == action_add_podsestava:
             self.add_podsestava(index.row())
+        if action == action_delete_zakazka:
+            self.delete_selected_zakazka(index.row())
+
+    def delete_selected_zakazka(self, row):
+         # Získej ID zakázky z tabulky (předpokládáme, že je v prvním sloupci)
+        zakazka_id = self.zakazka_table.model().index(row, 0).data()
+
+        if zakazka_id is None:
+            return
+
+        # Potvrzení od uživatele
+        reply = QMessageBox.question(
+            self,
+            "Potvrzení smazání",
+            "Opravdu chceš smazat tuto zakázku včetně všech jejích položek?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Smazání z databáze
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+
+        # Smaž nejdřív položky, které na zakázku odkazují
+        cursor.execute("DELETE FROM položka WHERE zakazka = ?", (zakazka_id,))
+        # Smaž samotnou zakázku
+        cursor.execute("DELETE FROM zakázka WHERE id = ?", (zakazka_id,))
+        
+        conn.commit()
+        conn.close()
+
+        # Aktualizuj zobrazení
+        self.zakazka_model.select()
 
     def add_polozka(self, row):
         """Opens a dialog to add a new polozka and saves it to the database."""
@@ -270,17 +327,26 @@ class NumberingOfDesignDocumentation(QWidget):
             if not title:  # Title is required
                 return
 
-            conn = sqlite3.connect("database.db")
+            conn = sqlite3.connect(db_address)
             cursor = conn.cursor()
 
             cursor.execute("INSERT INTO položka (number, title, ks, zakazka) VALUES (?, ?, ?, ?)",
                            (number if number else None, title, ks, zakazka_id))
+            
+            new_item_id = cursor.lastrowid
 
             conn.commit()
             conn.close()
 
             # Refresh table
             self.update_polozka_table()
+
+            for row in range(self.polozka_filter_model.rowCount()):
+                index = self.polozka_filter_model.index(row, 0)
+                item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
+                if item_id == new_item_id:
+                    self.generate_vykres(row)  # Zavolání funkce pro generování výkresu
+                    break
 
     def add_podsestava(self, row):
         """Opens a dialog to add a new podsestava and saves it to the database."""
@@ -293,7 +359,7 @@ class NumberingOfDesignDocumentation(QWidget):
             if not title:  # Title is required
                 return
 
-            conn = sqlite3.connect("database.db")
+            conn = sqlite3.connect(db_address)
             cursor = conn.cursor()
 
             cursor.execute("INSERT INTO položka (title, zakazka) VALUES (?, ?)",
@@ -322,6 +388,21 @@ class NumberingOfDesignDocumentation(QWidget):
             return
 
         menu = QMenu(self)
+
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2C2C2C;
+                color: white;
+                border: 1px solid #444;
+            }
+            QMenu::item {
+                background-color: transparent;
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #444;
+            }
+        """)
         
         action_generate_number = menu.addAction("Generovat číslo")
         action_edit_item = menu.addAction("Editovat položku")
@@ -347,7 +428,7 @@ class NumberingOfDesignDocumentation(QWidget):
         def get_db_connection():
             if not QSqlDatabase.contains("qt_sql_default_connection"):
                 db = QSqlDatabase.addDatabase("QSQLITE")
-                db.setDatabaseName("database.db")
+                db.setDatabaseName(db_address)
                 if not db.open():
                     print("Chyba při otevírání databáze")
                 return db
@@ -368,8 +449,10 @@ class NumberingOfDesignDocumentation(QWidget):
         current_number = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 3))
         current_title = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 2))
         current_vykres = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 1))
+        current_ks = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 7))
+        current_user = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 8))
 
-        dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, self)
+        dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, current_ks, current_user, self)
         if dialog.exec():
             self.polozka_model.select()
             self.polozka_filter_helper.setQuery(self.polozka_filter_helper.query().executedQuery())  # Refresh filter model
@@ -377,11 +460,12 @@ class NumberingOfDesignDocumentation(QWidget):
     def generate_vykres(self, row):
         """Generuje hodnotu vykres pro položku na daném řádku, pokud ještě není vyplněna."""
         # Získání indexu vybrané položky podle řádku
+        user = getpass.getuser().capitalize()
         index = self.polozka_filter_model.index(row, 0)  # Sloupec 0 je ID položky
         item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
 
         # Připojení k databázi
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(db_address)
         cursor = conn.cursor()
 
         # Kontrola, jestli už vykres existuje
@@ -427,7 +511,7 @@ class NumberingOfDesignDocumentation(QWidget):
         current_date = datetime.today().strftime('%d. %m. %Y')
 
         # Aktualizace hodnoty v databázi
-        cursor.execute("UPDATE položka SET date = ?, vykres = ? WHERE id = ?", (current_date, new_vykres, item_id))
+        cursor.execute("UPDATE položka SET date = ?, user=?, vykres = ? WHERE id = ?", (current_date, user, new_vykres, item_id))
         conn.commit()
         conn.close()
 
@@ -499,7 +583,7 @@ class NumberingOfDesignDocumentation(QWidget):
 
     def insert_data(self, data):
         """Inserts data into the database."""
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(db_address)
         cursor = conn.cursor()
         
         # Insert zakázka data
@@ -571,7 +655,7 @@ class NumberingOfDesignDocumentation(QWidget):
                 return
             
             # Kontrola duplicitního čísla zakázky
-            conn = sqlite3.connect('database.db')
+            conn = sqlite3.connect(db_address)
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM zakázka WHERE number = ?", (cislo,))
             if cursor.fetchone()[0] > 0:
@@ -592,9 +676,74 @@ class NumberingOfDesignDocumentation(QWidget):
 
 
 if __name__ == "__main__":
-    os.environ["QT_DISABLE_COLOR_SCHEME"] = "1"
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon("helpers/logo.ico"))
+    app.setStyleSheet("""
+        QWidget {
+            background-color: #1c1c1c;
+            color: white;
+        }
+        QPushButton {
+            background-color: #444;
+            color: white;
+            border: 1px solid #666;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        QPushButton:hover {
+            background-color: #555;
+        }
+
+        QPushButton:pressed {
+            background-color: #333;
+        }
+
+        QPushButton:disabled {
+            background-color: #222;
+            color: #888;
+        }
+        QTableView { 
+            alternate-background-color: #2C2C2C; 
+            background-color: #3b3b3b; 
+            selection-background-color: #89CFF0;
+            selection-color: #3b3b3b;
+            color: white;
+            border: none;
+        }
+        QHeaderView::section {
+            background-color: #444;
+            color: white;
+        }
+        QFrame {
+            background-color: #2C2C2C;
+            border: none;
+        }
+        QLabel {
+            background-color: transparent;              
+                      
+        }
+        QScrollBar:vertical {
+            background: transparent;
+            width: 12px;
+            margin: 0px;
+        }
+
+        QScrollBar::handle:vertical {
+            background: #666;
+            min-height: 20px;
+            border-radius: 4px;
+        }
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            background: none;
+            height: 0px;
+        }
+        QScrollBar::add-page:vertical, 
+        QScrollBar::sub-page:vertical {
+            background: #2C2C2C;  /* Tady nastavíš čistou barvu tracku */
+        }
+        """)
+    app.setWindowIcon(QIcon("J:/Vývoj/helpers/logo.ico"))
     window = NumberingOfDesignDocumentation()
     window.setWindowTitle("Konstrukční dokumentace")
     window.show()
