@@ -9,17 +9,20 @@ class AddPolozkaDialog(QDialog):
 
         layout = QFormLayout()
 
-        self.number_input = QLineEdit()
-        self.number_input.setPlaceholderText("Číslo položky")
+        self.setFixedWidth(350)
+        self.setFixedHeight(150)
 
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("Název")
 
+        self.number_input = QLineEdit()
+        self.number_input.setPlaceholderText("Číslo položky")
+
         self.ks_input = QSpinBox()
         self.ks_input.setMinimum(1)
 
-        layout.addRow("Číslo položky:", self.number_input)
         layout.addRow("Název:", self.title_input)
+        layout.addRow("Číslo položky:", self.number_input)
         layout.addRow("Ks:", self.ks_input)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)

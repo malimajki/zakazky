@@ -9,15 +9,14 @@ from datetime import datetime
 from functions.pdf2data import extract_data_from_pdf
 from classes.nova_zakazka_dialog import NovaZakazkaDialog
 from classes.nova_polozka_dialog import AddPolozkaDialog
-from classes.nova_podsestava_dialog import AddPodsestavaDialog
 from classes.edit_polozka_dialog import EditItemDialog
 import ctypes
 import getpass
 
 myappid = 'VHZ-DIS.konstrukcni_dokumentace.1.0'
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-# db_address="J:\Vývoj\database.db"
-db_address="database.db"
+db_address="J:\Vývoj\database.db"
+# db_address="database.db"
 
 class CenterAlignDelegate(QStyledItemDelegate):
     def initStyleOption(self, option, index):
@@ -272,14 +271,11 @@ class NumberingOfDesignDocumentation(QWidget):
         """)
 
         action_add_polozka = menu.addAction("Přidat položku")
-        action_add_podsestava = menu.addAction("Přidat podsestavu")
         action_delete_zakazka = menu.addAction("Smazat zakázku")
 
         action = menu.exec(self.zakazka_table.viewport().mapToGlobal(position))
         if action == action_add_polozka:
             self.add_polozka(index.row())
-        if action == action_add_podsestava:
-            self.add_podsestava(index.row())
         if action == action_delete_zakazka:
             self.delete_selected_zakazka(index.row())
 
@@ -341,39 +337,6 @@ class NumberingOfDesignDocumentation(QWidget):
             # Refresh table
             self.update_polozka_table()
 
-            for row in range(self.polozka_filter_model.rowCount()):
-                index = self.polozka_filter_model.index(row, 0)
-                item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
-                if item_id == new_item_id:
-                    self.generate_vykres(row)  # Zavolání funkce pro generování výkresu
-                    break
-
-    def add_podsestava(self, row):
-        """Opens a dialog to add a new podsestava and saves it to the database."""
-        zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
-
-        dialog = AddPodsestavaDialog(zakazka_id, self)
-        if dialog.exec():
-            title = dialog.get_data()
-
-            if not title:  # Title is required
-                return
-
-            conn = sqlite3.connect(db_address)
-            cursor = conn.cursor()
-
-            cursor.execute("INSERT INTO položka (title, zakazka) VALUES (?, ?)",
-                        (title, zakazka_id))
-
-            new_item_id = cursor.lastrowid
-
-            conn.commit()
-            conn.close()
-
-            # Refresh table
-            self.update_polozka_table()
-
-            # Najdi řádek nově vložené položky v modelu
             for row in range(self.polozka_filter_model.rowCount()):
                 index = self.polozka_filter_model.index(row, 0)
                 item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
