@@ -12,6 +12,7 @@ Tato desktopová aplikace slouží k **evidenci zakázek a automatickému čísl
 - 🕒 Záznam data a přihlášeného uživatele (z Windows) při generování čísla
 - ✏️ Úpravy položek, možnost ručně mazat a měnit čísla výkresů
 - 🧹 Automatické odstranění metadat při smazání čísla výkresu
+- 🔍 Vyhledávání a filtrování
 
 ---
 
@@ -43,6 +44,12 @@ Tato desktopová aplikace slouží k **evidenci zakázek a automatickému čísl
 
 5. **Chytrá posloupnost**
    - Pokud ručně změníš číslo výkresu (např. `K-546-04` → `K-546-07`), systém při dalším generování pokračuje číslem `K-546-08`
+  
+6. **Vyhledávání a filtrování**
+   - Po kliknutí na konkrétní zakázku se zobrazí pouze položky, které k ní přísluší.
+   - V levém horním rohu se nachází vyhledávací pole, které při psaní dynamicky filtruje seznam položek.
+      - Filtr prohledává sloupce „Název“ a „Zakázka“.
+      - Vyhledávání probíhá okamžitě během psaní (bez potvrzení).
 
 ---
 
