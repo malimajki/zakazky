@@ -4,13 +4,13 @@ from datetime import datetime
 import getpass
 
 class EditItemDialog(QDialog):
-    def __init__(self, db, polozka_id, number, title, vykres, ks, user, parent=None):
+    def __init__(self, db, polozka_id, number, title, vykres, user, ks, parent=None):
         super().__init__(parent)
         self.db = db
         self.polozka_id = polozka_id
 
         self.setWindowTitle("Editace položky")
-        self.setFixedSize(300, 340)
+        self.setFixedSize(300, 320)
 
         layout = QVBoxLayout()
 
@@ -28,8 +28,7 @@ class EditItemDialog(QDialog):
         layout.addWidget(self.input_vykres)
         layout.addWidget(QLabel("Počet kusů:"))
         layout.addWidget(self.input_ks)
-        layout.addWidget(QLabel("Vytvořil:"))
-        layout.addWidget(self.input_user)
+        layout.addStretch()
 
         self.button_ok = QPushButton("Uložit")
         self.button_cancel = QPushButton("Zrušit")
@@ -46,11 +45,13 @@ class EditItemDialog(QDialog):
         new_title = self.input_title.text()
         new_vykres = self.input_vykres.text()
         new_ks = self.input_ks.text()
-        new_user = self.input_user.text()
         current_date = datetime.today().strftime('%d. %m. %Y')
+        new_user = self.input_user.text()
+
         if new_vykres == "":
             new_vykres = None
             current_date = None
+            new_user = ""
         
         if not new_user and new_vykres:
             new_user = getpass.getuser().capitalize()

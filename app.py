@@ -415,7 +415,7 @@ class NumberingOfDesignDocumentation(QWidget):
         current_ks = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 7))
         current_user = self.polozka_filter_helper.data(self.polozka_filter_helper.index(source_index.row(), 8))
 
-        dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, current_ks, current_user, self)
+        dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, current_user, current_ks, self)
         if dialog.exec():
             self.polozka_model.select()
             self.polozka_filter_helper.setQuery(self.polozka_filter_helper.query().executedQuery())  # Refresh filter model
