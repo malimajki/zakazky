@@ -202,11 +202,7 @@ class NumberingOfDesignDocumentation(QWidget):
 
         # Model pro filtrování podle ID zakázky
         self.polozka_filter_helper = QSqlQueryModel()
-        self.polozka_filter_helper.setQuery('''
-            SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks, p.user
-            FROM položka p
-            LEFT JOIN zakázka z ON p.zakazka = z.id
-        ''') 
+        self.filter_polozky_by_zakazka()  # načte vše bez filtru
 
         self.polozka_filter_model = QSortFilterProxyModel(self)
         self.polozka_filter_model.setSourceModel(self.polozka_filter_helper)
@@ -234,6 +230,29 @@ class NumberingOfDesignDocumentation(QWidget):
 
 
         self.polozka_table.setModel(self.polozka_filter_model)
+
+    def filter_polozky_by_zakazka(self, zakazka_id=None):
+        """Filtruje položky podle ID zakázky pomocí parametrizovaného dotazu."""
+        query = QSqlQuery()
+        
+        if zakazka_id is not None:
+            query.prepare('''
+                SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks, p.user
+                FROM položka p
+                LEFT JOIN zakázka z ON p.zakazka = z.id
+                WHERE p.zakazka = :zakazka_id
+            ''')
+            query.bindValue(':zakazka_id', zakazka_id)
+        else:
+            query.prepare('''
+                SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks, p.user
+                FROM položka p
+                LEFT JOIN zakázka z ON p.zakazka = z.id
+            ''')
+        
+        query.exec()
+
+        self.polozka_filter_helper.setQuery(query)
 
     def update_polozka_table(self):
         """Aktualizuje tabulku položek po změně názvu zakázky."""
@@ -281,7 +300,7 @@ class NumberingOfDesignDocumentation(QWidget):
 
     def delete_selected_zakazka(self, row):
          # Získej ID zakázky z tabulky (předpokládáme, že je v prvním sloupci)
-        zakazka_id = self.zakazka_table.model().index(row, 0).data()
+        zakazka_id = int(self.zakazka_table.model().index(row, 0).data())
 
         if zakazka_id is None:
             return
@@ -298,7 +317,7 @@ class NumberingOfDesignDocumentation(QWidget):
             return
 
         # Smazání z databáze
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(db_address)
         cursor = conn.cursor()
 
         # Smaž nejdřív položky, které na zakázku odkazují
@@ -524,15 +543,14 @@ class NumberingOfDesignDocumentation(QWidget):
         self.polozka_filter_model.setFilterRegularExpression(regex)
 
 
-    def zakazka_changed(self):
-        selected_indexes = self.zakazka_table.selectionModel().selectedRows()
-        if selected_indexes:
-            # Získání ID vybrané zakázky (první sloupec je ID, ale je skrytý)
-            zakazka_id = self.zakazka_model.data(selected_indexes[0].siblingAtColumn(0), Qt.DisplayRole)
-            self.polozka_filter_model.setFilterKeyColumn(4)  # Filtruj podle sloupce `zakazka` v tabulce položka
-            self.polozka_filter_model.setFilterFixedString(str(zakazka_id))
+    def zakazka_changed(self, selected):
+        indexes = selected.indexes()
+        if indexes:
+            row = indexes[0].row()
+            zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
+            self.filter_polozky_by_zakazka(zakazka_id)
         else:
-            self.polozka_filter_model.setFilterFixedString("")
+            self.filter_polozky_by_zakazka(None)
 
     def import_pdf(self):
         """Handles PDF import and data extraction."""
