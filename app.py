@@ -7,11 +7,14 @@ import sqlite3
 from datetime import datetime
 
 from functions.pdf2data import extract_data_from_pdf
+from functions.database import get_db_connection, SQLiteDB
 from classes.nova_zakazka_dialog import NovaZakazkaDialog
 from classes.nova_polozka_dialog import AddPolozkaDialog
 from classes.edit_polozka_dialog import EditItemDialog
 import ctypes
 import getpass
+
+db = SQLiteDB()
 
 myappid = 'VHZ-DIS.konstrukcni_dokumentace.1.0'
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
@@ -100,10 +103,14 @@ class NumberingOfDesignDocumentation(QWidget):
         # Set up models for the tables
         self.setup_models()
 
-    def initialize_database(self):
-        """Creates the tables in the database."""
+    def connect_db(self):
         conn = sqlite3.connect(db_address)
         cursor = conn.cursor()
+        return conn, cursor
+
+    def initialize_database(self):
+        """Creates the tables in the database."""
+        conn, cursor = self.connect_db()
         
         # Create zakázka table
         cursor.execute('''
@@ -146,9 +153,7 @@ class NumberingOfDesignDocumentation(QWidget):
     def setup_models(self):
         """Sets up the models for the tables."""
         # Set up QSqlDatabase connection
-        db = QSqlDatabase.addDatabase("QSQLITE")
-        db.setDatabaseName(db_address)
-        db.open()
+        db = get_db_connection()
 
         # Zakázka model
         self.zakazka_model = QSqlTableModel(self, db)
@@ -254,16 +259,23 @@ class NumberingOfDesignDocumentation(QWidget):
 
         self.polozka_filter_helper.setQuery(query)
 
+    def get_selected_zakazka_id(self):
+        """Vrací ID aktuálně vybrané zakázky nebo None."""
+        selected_indexes = self.zakazka_table.selectionModel().selectedIndexes()
+        if selected_indexes:
+            row = selected_indexes[0].row()
+            return self.zakazka_model.data(self.zakazka_model.index(row, 0))
+        return None
+
     def update_polozka_table(self):
-        """Aktualizuje tabulku položek po změně názvu zakázky."""
-        self.zakazka_model.submitAll()     # Uloží změny v zakazka_model
-        self.polozka_model.select()        # Načte znovu data v polozka_model
-        self.polozka_filter_model.invalidate()  # Obnoví proxy model
-        self.polozka_filter_helper.setQuery('''
-                SELECT p.id, p.vykres, p.title, p.number, p.zakazka, z.title AS zakazka_name, p.date, p.ks, p.user
-                FROM položka p
-                LEFT JOIN zakázka z ON p.zakazka = z.id
-            ''')
+        """Aktualizuje tabulku položek a zachová aktuální filtr podle zakázky."""
+        zakazka_id = self.get_selected_zakazka_id()
+
+        self.zakazka_model.submitAll()
+        self.polozka_model.select()
+        self.polozka_filter_model.invalidate()
+
+        self.filter_polozky_by_zakazka(zakazka_id)
 
 
     def show_zakazka_context_menu(self, position):
@@ -317,8 +329,7 @@ class NumberingOfDesignDocumentation(QWidget):
             return
 
         # Smazání z databáze
-        conn = sqlite3.connect(db_address)
-        cursor = conn.cursor()
+        conn, cursor = self.connect_db()
 
         # Smaž nejdřív položky, které na zakázku odkazují
         cursor.execute("DELETE FROM položka WHERE zakazka = ?", (zakazka_id,))
@@ -353,15 +364,13 @@ class NumberingOfDesignDocumentation(QWidget):
             conn.commit()
             conn.close()
 
-            # Refresh table
-            self.update_polozka_table()
-
             for row in range(self.polozka_filter_model.rowCount()):
                 index = self.polozka_filter_model.index(row, 0)
                 item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
                 if item_id == new_item_id:
                     self.generate_vykres(row)  # Zavolání funkce pro generování výkresu
                     break
+        self.update_polozka_table()
 
     def show_polozka_context_menu(self, position):
         """Shows context menu on right-click in the položka table."""
@@ -407,16 +416,6 @@ class NumberingOfDesignDocumentation(QWidget):
 
     def edit_selected_item(self):
 
-        def get_db_connection():
-            if not QSqlDatabase.contains("qt_sql_default_connection"):
-                db = QSqlDatabase.addDatabase("QSQLITE")
-                db.setDatabaseName(db_address)
-                if not db.open():
-                    print("Chyba při otevírání databáze")
-                return db
-            else:
-                return QSqlDatabase.database("qt_sql_default_connection")
-
         self.db = get_db_connection()
 
         if not self.db.open():
@@ -437,7 +436,7 @@ class NumberingOfDesignDocumentation(QWidget):
         dialog = EditItemDialog(self.db, polozka_id, current_number, current_title, current_vykres, current_user, current_ks, self)
         if dialog.exec():
             self.polozka_model.select()
-            self.polozka_filter_helper.setQuery(self.polozka_filter_helper.query().executedQuery())  # Refresh filter model
+            self.update_polozka_table()
 
     def generate_vykres(self, row):
         """Generuje hodnotu vykres pro položku na daném řádku, pokud ještě není vyplněna."""
@@ -446,9 +445,7 @@ class NumberingOfDesignDocumentation(QWidget):
         index = self.polozka_filter_model.index(row, 0)  # Sloupec 0 je ID položky
         item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
 
-        # Připojení k databázi
-        conn = sqlite3.connect(db_address)
-        cursor = conn.cursor()
+        conn, cursor = self.connect_db()
 
         # Kontrola, jestli už vykres existuje
         cursor.execute("SELECT vykres FROM položka WHERE id = ?", (item_id,))
@@ -515,10 +512,7 @@ class NumberingOfDesignDocumentation(QWidget):
         msg_box.exec()
 
         if msg_box.clickedButton() == yes_button:
-            db = QSqlDatabase.database()
-            if not db.isOpen():
-                QMessageBox.critical(self, "Chyba databáze", "Databáze není otevřená!")
-                return
+            db = get_db_connection()
 
             query = QSqlQuery(db)
             for index in selected_indexes:
@@ -533,7 +527,7 @@ class NumberingOfDesignDocumentation(QWidget):
                     return
 
             # Obnovíme model, aby se změny zobrazily
-            self.polozka_filter_helper.setQuery(self.polozka_filter_helper.query().executedQuery()) 
+            self.update_polozka_table()
 
     def on_search_text_changed(self, text):
         """Triggered when the search input changes."""
@@ -564,9 +558,7 @@ class NumberingOfDesignDocumentation(QWidget):
 
     def insert_data(self, data):
         """Inserts data into the database."""
-        conn = sqlite3.connect(db_address)
-        cursor = conn.cursor()
-        
+        conn, cursor = self.connect_db()
         # Insert zakázka data
         zakazka_data = data['zakázka']
         try:
