@@ -3,7 +3,6 @@ from PySide6.QtSql import QSqlDatabase, QSqlTableModel, QSqlRelationalTableModel
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QRegularExpression
 from PySide6.QtGui import QIcon
 import sys
-import sqlite3
 from datetime import datetime
 
 from functions.pdf2data import extract_data_from_pdf
@@ -103,17 +102,21 @@ class NumberingOfDesignDocumentation(QWidget):
         # Set up models for the tables
         self.setup_models()
 
-    def connect_db(self):
-        conn = sqlite3.connect(db_address)
-        cursor = conn.cursor()
-        return conn, cursor
-
     def initialize_database(self):
-        """Creates the tables in the database."""
-        conn, cursor = self.connect_db()
-        
-        # Create zakázka table
-        cursor.execute('''
+
+        if not QSqlDatabase.contains("qt_sql_default_connection"):
+            db = QSqlDatabase.addDatabase("QSQLITE")
+            db.setDatabaseName(db_address)
+            if not db.open():
+                print("Chyba při otevírání databáze")
+        else:
+            db = QSqlDatabase.database()
+            if not db.isOpen():
+                db.open()
+
+        query = QSqlQuery(db)
+
+        query.exec('''
             CREATE TABLE IF NOT EXISTS zakázka (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 number TEXT UNIQUE,
@@ -121,8 +124,7 @@ class NumberingOfDesignDocumentation(QWidget):
             )
         ''')
 
-        # Create položka table
-        cursor.execute('''
+        query.exec('''
             CREATE TABLE IF NOT EXISTS položka (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 number TEXT,
@@ -131,14 +133,10 @@ class NumberingOfDesignDocumentation(QWidget):
                 zakazka INTEGER,
                 vykres TEXT NULL,
                 date TEXT NULL,
-                user TEXT NULL, 
+                user TEXT NULL,
                 FOREIGN KEY(zakazka) REFERENCES zakázka(id)
-                       
             )
         ''')
-        
-        conn.commit()
-        conn.close()
 
     def get_db_connection():
         if not QSqlDatabase.contains("qt_sql_default_connection"):
@@ -311,64 +309,63 @@ class NumberingOfDesignDocumentation(QWidget):
             self.delete_selected_zakazka(index.row())
 
     def delete_selected_zakazka(self, row):
-         # Získej ID zakázky z tabulky (předpokládáme, že je v prvním sloupci)
         zakazka_id = int(self.zakazka_table.model().index(row, 0).data())
-
         if zakazka_id is None:
             return
 
-        # Potvrzení od uživatele
         reply = QMessageBox.question(
             self,
             "Potvrzení smazání",
             "Opravdu chceš smazat tuto zakázku včetně všech jejích položek?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Smazání z databáze
-        conn, cursor = self.connect_db()
+        db = QSqlDatabase.database()
+        if not db.isOpen():
+            db.open()
 
-        # Smaž nejdřív položky, které na zakázku odkazují
-        cursor.execute("DELETE FROM položka WHERE zakazka = ?", (zakazka_id,))
-        # Smaž samotnou zakázku
-        cursor.execute("DELETE FROM zakázka WHERE id = ?", (zakazka_id,))
-        
-        conn.commit()
-        conn.close()
+        query = QSqlQuery(db)
+        query.prepare("DELETE FROM položka WHERE zakazka = ?")
+        query.addBindValue(zakazka_id)
+        query.exec()
 
-        # Aktualizuj zobrazení
+        query.prepare("DELETE FROM zakázka WHERE id = ?")
+        query.addBindValue(zakazka_id)
+        query.exec()
+
         self.zakazka_model.select()
 
     def add_polozka(self, row):
-        """Opens a dialog to add a new polozka and saves it to the database."""
         zakazka_id = self.zakazka_model.data(self.zakazka_model.index(row, 0))
 
         dialog = AddPolozkaDialog(zakazka_id, self)
         if dialog.exec():
             number, title, ks = dialog.get_data()
-
-            if not title:  # Title is required
+            if not title:
                 return
 
-            conn = sqlite3.connect(db_address)
-            cursor = conn.cursor()
+            db = QSqlDatabase.database()
+            if not db.isOpen():
+                db.open()
 
-            cursor.execute("INSERT INTO položka (number, title, ks, zakazka) VALUES (?, ?, ?, ?)",
-                           (number if number else None, title, ks, zakazka_id))
-            
-            new_item_id = cursor.lastrowid
+            query = QSqlQuery(db)
+            query.prepare("INSERT INTO položka (number, title, ks, zakazka) VALUES (?, ?, ?, ?)")
+            query.addBindValue(number if number else None)
+            query.addBindValue(title)
+            query.addBindValue(ks)
+            query.addBindValue(zakazka_id)
+            query.exec()
 
-            conn.commit()
-            conn.close()
+            new_item_id = query.lastInsertId()
 
+            self.update_polozka_table()
             for row in range(self.polozka_filter_model.rowCount()):
                 index = self.polozka_filter_model.index(row, 0)
-                item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
+                item_id =int(self.polozka_filter_model.data(index, Qt.DisplayRole))
                 if item_id == new_item_id:
-                    self.generate_vykres(row)  # Zavolání funkce pro generování výkresu
+                    self.generate_vykres(row)
                     break
         self.update_polozka_table()
 
@@ -445,54 +442,66 @@ class NumberingOfDesignDocumentation(QWidget):
         index = self.polozka_filter_model.index(row, 0)  # Sloupec 0 je ID položky
         item_id = self.polozka_filter_model.data(index, Qt.DisplayRole)
 
-        conn, cursor = self.connect_db()
+        db = QSqlDatabase.database()
+        if not db.isOpen():
+            db.open()
 
-        # Kontrola, jestli už vykres existuje
-        cursor.execute("SELECT vykres FROM položka WHERE id = ?", (item_id,))
-        existing_vykres = cursor.fetchone()
-        if existing_vykres and existing_vykres[0]:  # Pokud existuje a není prázdný
+        query = QSqlQuery(db)
+
+        # Zkontroluj, jestli vykres už existuje
+        query.prepare("SELECT vykres FROM položka WHERE id = ?")
+        query.addBindValue(item_id)
+        query.exec()
+        if query.next() and query.value(0):
             QMessageBox.warning(self, "Upozornění", "Tato položka již má číslo výkresu.")
-            conn.close()
             return
 
         # Získání ID zakázky
         zakazka_id = self.polozka_filter_model.data(index.siblingAtColumn(4), Qt.DisplayRole)
 
         # Získání čísla zakázky
-        cursor.execute("SELECT number FROM zakázka WHERE id = ?", (zakazka_id,))
-        zakazka_number = cursor.fetchone()
-        if not zakazka_number:
+        query.prepare("SELECT number FROM zakázka WHERE id = ?")
+        query.addBindValue(zakazka_id)
+        query.exec()
+        if query.next():
+            zakazka_number = query.value(0)
+        else:
             QMessageBox.warning(self, "Upozornění", "Nelze najít číslo zakázky.")
-            conn.close()
             return
-        zakazka_number = zakazka_number[0]
 
         zakazka_prefix = zakazka_number[:3]  # Standardní tříznakový prefix
 
-        # Získání nejvyššího čísla pro danou skupinu zakázek
-        cursor.execute("""
+        # Najdi nejvyšší číslo výkresu pro daný prefix
+        query.prepare("""
             SELECT vykres FROM položka 
             WHERE zakazka IN (SELECT id FROM zakázka WHERE number LIKE ?) 
             AND vykres LIKE ?
             ORDER BY vykres DESC LIMIT 1
-        """, (f"{zakazka_prefix}%", f"K-{zakazka_prefix}-%"))
-        
-        last_vykres = cursor.fetchone()
-        if last_vykres:
-            # Extrahování posledního čísla
-            last_number = int(last_vykres[0].split('-')[-1])
+        """)
+        query.addBindValue(f"{zakazka_prefix}%")
+        query.addBindValue(f"K-{zakazka_prefix}-%")
+        query.exec()
+        if query.next():
+            last_vykres = query.value(0)
+            last_number = int(last_vykres.split('-')[-1])
             new_number = last_number + 1
         else:
             new_number = 1
 
-        # Vygenerování nového čísla
         new_vykres = f"K-{zakazka_prefix}-{new_number:02d}"
         current_date = datetime.today().strftime('%d. %m. %Y')
 
-        # Aktualizace hodnoty v databázi
-        cursor.execute("UPDATE položka SET date = ?, user=?, vykres = ? WHERE id = ?", (current_date, user, new_vykres, item_id))
-        conn.commit()
-        conn.close()
+        # UPDATE položky
+        query.prepare("""
+            UPDATE položka 
+            SET date = ?, user = ?, vykres = ?
+            WHERE id = ?
+        """)
+        query.addBindValue(current_date)
+        query.addBindValue(user)
+        query.addBindValue(new_vykres)
+        query.addBindValue(item_id)
+        query.exec()
 
         self.update_polozka_table()
 
@@ -557,32 +566,31 @@ class NumberingOfDesignDocumentation(QWidget):
             self.insert_data(data)
 
     def insert_data(self, data):
-        """Inserts data into the database."""
-        conn, cursor = self.connect_db()
-        # Insert zakázka data
-        zakazka_data = data['zakázka']
-        try:
-            cursor.execute('''
-                INSERT INTO zakázka (number, title) VALUES (?, ?)
-            ''', (zakazka_data[0][0], zakazka_data[1][0]))
-     
-            # zakazka_id = zakazka_data[0][0]  # Get zakazka nuber as foreign key
-            zakazka_id = cursor.lastrowid # Get the last inserted ID for foreign key
-            print (zakazka_id)
-            
-            # Insert položka data
-            for item in data['položky']:
-                cursor.execute('''
-                    INSERT INTO položka (number, title, ks, zakazka) 
-                    VALUES (?, ?, ?, ?)
-                ''', (item[0][0], item[1][0], item[2][0], zakazka_id))
-        
-            conn.commit()
-            
-        except sqlite3.IntegrityError:
-            conn.rollback()  # Rollback in case of an error
+        db = QSqlDatabase.database()
+        if not db.isOpen():
+            db.open()
 
-            # Show pop-up warning message
+        zakazka_data = data['zakázka']
+        query = QSqlQuery(db)
+
+        try:
+            query.prepare("INSERT INTO zakázka (number, title) VALUES (?, ?)")
+            query.addBindValue(zakazka_data[0][0])
+            query.addBindValue(zakazka_data[1][0])
+            query.exec()
+            zakazka_id = query.lastInsertId()
+
+            for item in data['položky']:
+                query.prepare("INSERT INTO položka (number, title, ks, zakazka) VALUES (?, ?, ?, ?)")
+                query.addBindValue(item[0][0])
+                query.addBindValue(item[1][0])
+                query.addBindValue(item[2][0])
+                query.addBindValue(zakazka_id)
+                query.exec()
+
+        except:
+            db.rollback()
+
             msg_box = QMessageBox()
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setWindowTitle("Duplicitní zakázka")
@@ -592,58 +600,49 @@ class NumberingOfDesignDocumentation(QWidget):
             result = msg_box.exec()
 
             if msg_box.clickedButton() == yes_button:
-                zakazka_number = zakazka_data[0][0]
-                cursor.execute("SELECT id FROM zakázka WHERE number = ?", (zakazka_number,))
-                result = cursor.fetchone()
-                if result:  # Ověření, zda byl nalezen výsledek
-                    zakazka_id = result[0]  # Získání id z n-tice
-                else:
-                    zakazka_id = None  # Pokud žádný záznam neexistuje
-                
-                # Insert položka data
-                for item in data['položky']:
-                    cursor.execute('''
-                        INSERT INTO položka (number, title, ks, zakazka) 
-                        VALUES (?, ?, ?, ?)
-                    ''', (item[0][0], item[1][0], item[2][0], zakazka_id))
-            
-                conn.commit()
+                query.prepare("SELECT id FROM zakázka WHERE number = ?")
+                query.addBindValue(zakazka_data[0][0])
+                query.exec()
+                if query.next():
+                    zakazka_id = query.value(0)
+                    for item in data['položky']:
+                        query.prepare("INSERT INTO položka (number, title, ks, zakazka) VALUES (?, ?, ?, ?)")
+                        query.addBindValue(item[0][0])
+                        query.addBindValue(item[1][0])
+                        query.addBindValue(item[2][0])
+                        query.addBindValue(zakazka_id)
+                        query.exec()
 
-        finally:
-            conn.close()
-
-        # Refresh the models to reflect changes
         self.zakazka_model.select()
         self.update_polozka_table()
 
     def vytvorit_zakazku(self):
-        # Otevření vlastního dialogu
         dialog = NovaZakazkaDialog(self)
         if dialog.exec() == QDialog.Accepted:
             nazev, cislo = dialog.get_data()
-            
-            # Kontrola, zda jsou vyplněna obě pole
             if not nazev or not cislo:
-                QMessageBox.warning(self, "Neplatné údaje", "Vyplňte prosím název i číslo zakázky.")
+                QMessageBox.warning(self, "Neplatné údeje", "Vyplňte prosím název i číslo zakázky.")
                 return
-            
-            # Kontrola duplicitního čísla zakázky
-            conn = sqlite3.connect(db_address)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM zakázka WHERE number = ?", (cislo,))
-            if cursor.fetchone()[0] > 0:
+
+            db = QSqlDatabase.database()
+            if not db.isOpen():
+                db.open()
+
+            query = QSqlQuery(db)
+            query.prepare("SELECT COUNT(*) FROM zakázka WHERE number = ?")
+            query.addBindValue(cislo)
+            query.exec()
+            if query.next() and query.value(0) > 0:
                 QMessageBox.warning(self, "Duplicitní číslo", "Zakázka s tímto číslem již existuje.")
-                conn.close()
                 return
-            
-            # Uložení nové zakázky do databáze
-            cursor.execute("INSERT INTO zakázka (title, number) VALUES (?, ?)", (nazev, cislo))
-            conn.commit()
-            conn.close()
-            
+
+            query.prepare("INSERT INTO zakázka (title, number) VALUES (?, ?)")
+            query.addBindValue(nazev)
+            query.addBindValue(cislo)
+            query.exec()
+
             QMessageBox.information(self, "Zakázka vytvořena", f"Zakázka '{nazev}' byla vytvořena.")
-            
-            # Aktualizace tabulky zakázek
+
             self.zakazka_model.select()
             self.update_polozka_table()
 
